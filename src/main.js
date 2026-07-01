@@ -1,6 +1,7 @@
 const { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, Tray } = require("electron");
 const path = require("node:path");
 const fs = require("node:fs");
+const zlib = require("node:zlib");
 const Database = require("better-sqlite3");
 
 let mainWindow;
@@ -270,97 +271,62 @@ function statusText(state = currentState()) {
   return `${label} for ${formatElapsed(Date.now() - new Date(state.activeSince).getTime())}`;
 }
 
-function csvEscape(value) {
-  const text = String(value ?? "");
-  if (!/[",\n]/.test(text)) return text;
-  return `"${text.replace(/"/g, '""')}"`;
-}
-
 function minutes(ms) {
   return Math.round((ms / 60000) * 100) / 100;
 }
 
-function exportCsv() {
+function exportWorkbook() {
   const segments = calculateTotals(allEvents()).segments;
   const stats = statsSummary();
-  const rows = [
+  const segmentRows = [
     [
-      "section",
-      "period_type",
-      "period_key",
       "date",
       "segment_start",
       "segment_end",
       "segment_type",
       "pause_reason",
       "note",
-      "duration_minutes",
-      "work_minutes",
-      "pause_minutes",
-      "total_minutes",
-      "category",
-      "category_minutes"
+      "duration_minutes"
     ],
     ...segments.map((segment) => [
-      "segment",
-      "",
-      "",
       todayKey(new Date(segment.start)),
       segment.start,
       segment.end,
       segment.type,
       segment.reason,
       segment.note,
-      segment.durationMinutes,
-      "",
-      "",
-      "",
-      "",
-      ""
-    ]),
-    ...statsRows("day", stats.days),
-    ...statsRows("week", stats.weeks),
-    ...statsRows("month", stats.months)
+      segment.durationMinutes
+    ])
   ];
-  return rows.map((row) => row.map(csvEscape).join(",")).join("\n");
+
+  return createXlsx([
+    { name: "Segments", rows: segmentRows },
+    { name: "Summary", rows: [...summaryRows("day", stats.days), ...summaryRows("week", stats.weeks), ...summaryRows("month", stats.months)] },
+    { name: "Category Summary", rows: [...categoryRows("day", stats.days), ...categoryRows("week", stats.weeks), ...categoryRows("month", stats.months)] }
+  ]);
 }
 
-function statsRows(periodType, periods) {
-  const rows = [];
+function summaryRows(periodType, periods) {
+  const rows = [["period_type", "period_key", "work_minutes", "pause_minutes", "total_minutes"]];
   for (const period of periods) {
     rows.push([
-      "summary",
       periodType,
       period.key,
-      "",
-      "",
-      "",
-      "",
-      "",
-      "",
-      "",
       minutes(period.workMs),
       minutes(period.pauseMs),
-      minutes(period.totalMs),
-      "",
-      ""
+      minutes(period.totalMs)
     ]);
+  }
+  return rows;
+}
 
+function categoryRows(periodType, periods) {
+  const rows = [["period_type", "period_key", "category", "category_minutes"]];
+  for (const period of periods) {
     for (const [category, categoryMs] of Object.entries(period.categories)) {
       rows.push([
-        "category_summary",
         periodType,
         period.key,
-        "",
-        "",
-        "",
-        "",
-        "",
-        "",
-        "",
-        "",
-        "",
-        "",
         category,
         minutes(categoryMs)
       ]);
@@ -369,14 +335,186 @@ function statsRows(periodType, periods) {
   return rows;
 }
 
-async function exportCsvWithDialog() {
+function createXlsx(sheets) {
+  const workbookSheets = sheets.map((sheet, index) => `
+    <sheet name="${xmlEscape(sheet.name)}" sheetId="${index + 1}" r:id="rId${index + 1}"/>`).join("");
+  const workbookRels = sheets.map((sheet, index) => `
+    <Relationship Id="rId${index + 1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet${index + 1}.xml"/>`).join("");
+  const contentSheetOverrides = sheets.map((sheet, index) => `
+    <Override PartName="/xl/worksheets/sheet${index + 1}.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>`).join("");
+  const files = [
+    {
+      path: "[Content_Types].xml",
+      content: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+        <Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+          <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+          <Default Extension="xml" ContentType="application/xml"/>
+          <Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>
+          <Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>
+          ${contentSheetOverrides}
+        </Types>`
+    },
+    {
+      path: "_rels/.rels",
+      content: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+        <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+          <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>
+        </Relationships>`
+    },
+    {
+      path: "xl/workbook.xml",
+      content: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+        <workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+          <sheets>${workbookSheets}</sheets>
+        </workbook>`
+    },
+    {
+      path: "xl/_rels/workbook.xml.rels",
+      content: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+        <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+          ${workbookRels}
+          <Relationship Id="rId${sheets.length + 1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>
+        </Relationships>`
+    },
+    {
+      path: "xl/styles.xml",
+      content: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+        <styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+          <fonts count="1"><font><sz val="11"/><name val="Calibri"/></font></fonts>
+          <fills count="1"><fill><patternFill patternType="none"/></fill></fills>
+          <borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders>
+          <cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>
+          <cellXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/></cellXfs>
+          <cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles>
+        </styleSheet>`
+    },
+    ...sheets.map((sheet, index) => ({
+      path: `xl/worksheets/sheet${index + 1}.xml`,
+      content: sheetXml(sheet.rows)
+    }))
+  ];
+  return zipFiles(files);
+}
+
+function sheetXml(rows) {
+  const xmlRows = rows.map((row, rowIndex) => {
+    const cells = row.map((value, columnIndex) => cellXml(columnName(columnIndex + 1), rowIndex + 1, value)).join("");
+    return `<row r="${rowIndex + 1}">${cells}</row>`;
+  }).join("");
+  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+    <worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+      <sheetData>${xmlRows}</sheetData>
+    </worksheet>`;
+}
+
+function cellXml(column, row, value) {
+  const reference = `${column}${row}`;
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return `<c r="${reference}"><v>${value}</v></c>`;
+  }
+  return `<c r="${reference}" t="inlineStr"><is><t>${xmlEscape(value)}</t></is></c>`;
+}
+
+function columnName(index) {
+  let name = "";
+  let current = index;
+  while (current > 0) {
+    const remainder = (current - 1) % 26;
+    name = String.fromCharCode(65 + remainder) + name;
+    current = Math.floor((current - 1) / 26);
+  }
+  return name;
+}
+
+function xmlEscape(value) {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&apos;");
+}
+
+function zipFiles(files) {
+  const localParts = [];
+  const centralParts = [];
+  let offset = 0;
+
+  for (const file of files) {
+    const name = Buffer.from(file.path, "utf8");
+    const content = Buffer.from(file.content.replace(/\n\s+/g, ""), "utf8");
+    const compressed = zlib.deflateRawSync(content);
+    const crc = crc32(content);
+    const local = Buffer.alloc(30);
+    local.writeUInt32LE(0x04034b50, 0);
+    local.writeUInt16LE(20, 4);
+    local.writeUInt16LE(0, 6);
+    local.writeUInt16LE(8, 8);
+    local.writeUInt16LE(0, 10);
+    local.writeUInt16LE(0, 12);
+    local.writeUInt32LE(crc, 14);
+    local.writeUInt32LE(compressed.length, 18);
+    local.writeUInt32LE(content.length, 22);
+    local.writeUInt16LE(name.length, 26);
+    local.writeUInt16LE(0, 28);
+    localParts.push(local, name, compressed);
+
+    const central = Buffer.alloc(46);
+    central.writeUInt32LE(0x02014b50, 0);
+    central.writeUInt16LE(20, 4);
+    central.writeUInt16LE(20, 6);
+    central.writeUInt16LE(0, 8);
+    central.writeUInt16LE(8, 10);
+    central.writeUInt16LE(0, 12);
+    central.writeUInt16LE(0, 14);
+    central.writeUInt32LE(crc, 16);
+    central.writeUInt32LE(compressed.length, 20);
+    central.writeUInt32LE(content.length, 24);
+    central.writeUInt16LE(name.length, 28);
+    central.writeUInt16LE(0, 30);
+    central.writeUInt16LE(0, 32);
+    central.writeUInt16LE(0, 34);
+    central.writeUInt16LE(0, 36);
+    central.writeUInt32LE(0, 38);
+    central.writeUInt32LE(offset, 42);
+    centralParts.push(central, name);
+
+    offset += local.length + name.length + compressed.length;
+  }
+
+  const centralDirectory = Buffer.concat(centralParts);
+  const end = Buffer.alloc(22);
+  end.writeUInt32LE(0x06054b50, 0);
+  end.writeUInt16LE(0, 4);
+  end.writeUInt16LE(0, 6);
+  end.writeUInt16LE(files.length, 8);
+  end.writeUInt16LE(files.length, 10);
+  end.writeUInt32LE(centralDirectory.length, 12);
+  end.writeUInt32LE(offset, 16);
+  end.writeUInt16LE(0, 20);
+
+  return Buffer.concat([...localParts, centralDirectory, end]);
+}
+
+function crc32(buffer) {
+  let crc = 0xffffffff;
+  for (const byte of buffer) {
+    crc ^= byte;
+    for (let index = 0; index < 8; index += 1) {
+      crc = crc & 1 ? (crc >>> 1) ^ 0xedb88320 : crc >>> 1;
+    }
+  }
+  return (crc ^ 0xffffffff) >>> 0;
+}
+
+async function exportWorkbookWithDialog() {
   const result = await dialog.showSaveDialog(mainWindow, {
-    title: "Export time and stats",
-    defaultPath: `workday-time-export-${todayKey()}.csv`,
-    filters: [{ name: "CSV", extensions: ["csv"] }]
+    title: "Export time workbook",
+    defaultPath: `workday-time-export-${todayKey()}.xlsx`,
+    filters: [{ name: "Excel Workbook", extensions: ["xlsx"] }]
   });
   if (result.canceled || !result.filePath) return { canceled: true };
-  fs.writeFileSync(result.filePath, exportCsv(), "utf8");
+  fs.writeFileSync(result.filePath, exportWorkbook());
   return { canceled: false, filePath: result.filePath };
 }
 
@@ -461,7 +599,7 @@ function updateAppMenu() {
     {
       label: "File",
       submenu: [
-        { label: "Export CSV", click: exportCsvWithDialog },
+        { label: "Export XLSX", click: exportWorkbookWithDialog },
         { type: "separator" },
         {
           label: "Quit",
@@ -509,7 +647,7 @@ function updateAppMenu() {
             type: "info",
             title: "Workday Time Tracker Help",
             message: "Workday Time Tracker",
-            detail: "Use Start Work to begin tracking. Use the pause category buttons or Timer menu to pause with a reason. Stats show daily, weekly, and monthly totals. Export CSV includes both raw segments and summary stats."
+            detail: "Use Start Work to begin tracking. Use the pause category buttons or Timer menu to pause with a reason. Stats show daily, weekly, and monthly totals. Export XLSX creates separate workbook sheets for raw segments and summary stats."
           })
         },
         {
@@ -518,7 +656,7 @@ function updateAppMenu() {
             type: "info",
             title: "About Workday Time Tracker",
             message: "Workday Time Tracker",
-            detail: "A local SQLite-based workday timer with tray status, CSV export, and stats."
+            detail: "A local SQLite-based workday timer with tray status, XLSX export, and stats.\nVersion: 0.0.1\nAuthor: Noah Vandal, ITS Solutions"
           })
         }
       ]
@@ -546,7 +684,7 @@ ipcMain.handle("category:add", (_event, name) => {
   return currentState();
 });
 ipcMain.handle("csv:exportToday", async () => {
-  return exportCsvWithDialog();
+  return exportWorkbookWithDialog();
 });
 
 app.whenReady().then(() => {

@@ -36,8 +36,7 @@
     ],
     "win": {
       "icon": "assets/app-icon.ico",
-      "target": "portable",
-      "signAndEditExecutable": false
+      "target": "portable"
     }
   }
 }
