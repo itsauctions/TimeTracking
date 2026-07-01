@@ -8,7 +8,8 @@
     "dev": "electron .",
     "postinstall": "electron-rebuild",
     "make:icon": "node scripts/make-ico.js",
-    "package:win": "electron-builder --win portable"
+    "package:win": "electron-builder --win portable",
+    "package:win:wsl": "electron-builder --win portable -c.win.signAndEditExecutable=false"
   },
   "keywords": [
     "time-tracking",
