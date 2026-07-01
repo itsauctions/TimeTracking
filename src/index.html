@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Workday Time Tracker</title>
+    <link rel="icon" href="../assets/app-icon.png">
+    <link rel="stylesheet" href="./styles.css">
+  </head>
+  <body>
+    <nav class="app-nav" aria-label="Main">
+      <button class="tab-button active" id="timerTab" type="button">Timer</button>
+      <button class="tab-button" id="statsTab" type="button">Stats</button>
+      <button class="tab-button theme-button" id="themeButton" type="button">Theme</button>
+      <button class="icon-button" id="settingsButton" title="Settings" aria-label="Settings">⚙</button>
+    </nav>
+
+    <main class="app-shell" id="timerPage">
+      <section class="timer-panel">
+        <div class="topbar">
+          <div>
+            <p class="eyebrow">Workday</p>
+            <h1 id="statusLabel">Ready</h1>
+          </div>
+        </div>
+
+        <div class="time-grid">
+          <div>
+            <span class="metric-label">Work Time</span>
+            <strong id="workTime">00:00:00</strong>
+          </div>
+          <div>
+            <span class="metric-label">Paused</span>
+            <strong id="pauseTime">00:00:00</strong>
+          </div>
+          <div>
+            <span class="metric-label">Current Clock</span>
+            <strong id="clockTime">--:--</strong>
+          </div>
+        </div>
+
+        <div class="actions">
+          <button class="primary-action" id="startButton">Start Work</button>
+          <button class="primary-action pause-action" id="pauseButton">Pause</button>
+          <button class="primary-action resume-action" id="resumeButton">Resume</button>
+          <button class="primary-action stop-action" id="stopButton">End Day</button>
+        </div>
+
+        <form class="pause-form" id="pauseForm">
+          <div class="form-heading">
+            <span>Quick pause reasons</span>
+          </div>
+          <div class="quick-reasons" id="quickReasons"></div>
+          <label for="noteInput">Note</label>
+          <input id="noteInput" type="text" placeholder="Optional">
+        </form>
+      </section>
+
+      <section class="side-panel">
+        <div class="panel-head">
+          <h2>Today</h2>
+          <button id="exportButton">Export CSV</button>
+        </div>
+        <div class="event-list" id="eventList"></div>
+      </section>
+    </main>
+
+    <main class="stats-page hidden" id="statsPage">
+      <section class="stats-section">
+        <div class="panel-head">
+          <h2>Daily Stats</h2>
+        </div>
+        <div class="stats-list" id="dailyStats"></div>
+      </section>
+      <section class="stats-grid">
+        <div class="stats-section">
+          <h2>Weekly Totals</h2>
+          <div class="stats-list" id="weeklyStats"></div>
+        </div>
+        <div class="stats-section">
+          <h2>Monthly Totals</h2>
+          <div class="stats-list" id="monthlyStats"></div>
+        </div>
+      </section>
+    </main>
+
+    <dialog id="settingsDialog">
+      <form method="dialog" class="settings-form">
+        <div class="panel-head">
+          <h2>Settings</h2>
+          <button class="icon-button" value="close" title="Close" aria-label="Close">×</button>
+        </div>
+        <label for="categoryInput">New pause category</label>
+        <div class="inline-form">
+          <input id="categoryInput" type="text" placeholder="Example: Errand">
+          <button id="addCategoryButton" type="button">Add</button>
+        </div>
+        <div class="category-list" id="categoryList"></div>
+      </form>
+    </dialog>
+
+    <script src="./renderer.js"></script>
+  </body>
+</html>
