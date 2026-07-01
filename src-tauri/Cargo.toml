@@ -1,0 +1,16 @@
+[package]
+name = "workday-time-tracker"
+version = "0.2.0"
+description = "A small desktop workday timer with SQLite storage and XLSX export."
+edition = "2021"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+chrono = { version = "0.4", features = ["serde"] }
+dirs = "5"
+rusqlite = { version = "0.31", features = ["bundled"] }
+serde = { version = "1", features = ["derive"] }
+tauri = { version = "2", features = ["tray-icon"] }
+zip = { version = "2", default-features = false, features = ["deflate"] }

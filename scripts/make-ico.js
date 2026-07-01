@@ -4,6 +4,7 @@ const zlib = require("node:zlib");
 
 const input = path.join(__dirname, "..", "assets", "app-icon.png");
 const output = path.join(__dirname, "..", "assets", "app-icon.ico");
+const rgbaOutput = path.join(__dirname, "..", "assets", "app-icon-rgba.png");
 const sizes = [256, 128, 64, 32, 16];
 
 function readPng(filePath) {
@@ -178,4 +179,6 @@ function writeIco(images) {
 const source = readPng(input);
 const images = sizes.map((size) => ({ size, data: writePng(resizeNearest(source, size)) }));
 writeIco(images);
+fs.writeFileSync(rgbaOutput, writePng(source));
 console.log(`Wrote ${output}`);
+console.log(`Wrote ${rgbaOutput}`);
