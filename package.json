@@ -1,13 +1,15 @@
 {
   "name": "workday-time-tracker",
-  "version": "0.1.0",
-  "description": "A small desktop workday timer with SQLite storage and on-demand CSV export.",
+  "version": "0.2.0",
+  "description": "A small desktop workday timer with SQLite storage and XLSX export.",
   "main": "src/main.js",
   "scripts": {
     "start": "electron .",
     "dev": "electron .",
     "postinstall": "electron-rebuild",
     "make:icon": "node scripts/make-ico.js",
+    "tauri:dev": "tauri dev",
+    "tauri:build": "tauri build",
     "package:win": "electron-builder --win portable",
     "package:win:wsl": "electron-builder --win portable -c.win.signAndEditExecutable=false"
   },
@@ -22,6 +24,9 @@
     "@electron/rebuild": "^3.7.0",
     "electron": "^31.7.7",
     "electron-builder": "^24.13.3"
+  },
+  "optionalDependencies": {
+    "@tauri-apps/cli": "^2.6.2"
   },
   "dependencies": {
     "better-sqlite3": "^11.1.2"

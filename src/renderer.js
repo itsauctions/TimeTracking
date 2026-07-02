@@ -26,6 +26,7 @@ const monthlyStats = document.querySelector("#monthlyStats");
 
 let state;
 let stats;
+const trackerApi = createTrackerApi();
 const themes = [
   { id: "light", label: "Light" },
   { id: "night", label: "Night" },
@@ -132,8 +133,8 @@ function render() {
 }
 
 async function loadState() {
-  state = await window.tracker.getState();
-  stats = await window.tracker.getStats();
+  state = await trackerApi.getState();
+  stats = await trackerApi.getStats();
   render();
   renderStats();
 }
@@ -144,8 +145,8 @@ async function addEvent(type, reason = "") {
     reason: type === "pause" || type === "stop" ? reason : "",
     note: noteInput.value.trim()
   };
-  state = await window.tracker.addEvent(payload);
-  stats = await window.tracker.getStats();
+  state = await trackerApi.addEvent(payload);
+  stats = await trackerApi.getStats();
   noteInput.value = "";
   render();
   renderStats();
@@ -163,7 +164,7 @@ quickReasons.addEventListener("click", (event) => {
 });
 
 exportButton.addEventListener("click", async () => {
-  await window.tracker.exportToday();
+  await trackerApi.exportToday();
 });
 
 settingsButton.addEventListener("click", () => {
@@ -173,8 +174,8 @@ settingsButton.addEventListener("click", () => {
 addCategoryButton.addEventListener("click", async () => {
   const name = categoryInput.value.trim();
   if (!name) return;
-  state = await window.tracker.addCategory(name);
-  stats = await window.tracker.getStats();
+  state = await trackerApi.addCategory(name);
+  stats = await trackerApi.getStats();
   categoryInput.value = "";
   render();
   renderStats();
@@ -182,7 +183,7 @@ addCategoryButton.addEventListener("click", async () => {
 
 timerTab.addEventListener("click", () => showPage("timer"));
 statsTab.addEventListener("click", async () => {
-  stats = await window.tracker.getStats();
+  stats = await trackerApi.getStats();
   renderStats();
   showPage("stats");
 });
@@ -268,14 +269,39 @@ function renderThemeButton() {
   themeButton.textContent = theme.label;
 }
 
-window.tracker.onNavigate(async (page) => {
+trackerApi.onNavigate(async (page) => {
   if (page === "stats") {
-    stats = await window.tracker.getStats();
+    stats = await trackerApi.getStats();
     renderStats();
   }
   showPage(page);
 });
-window.tracker.onCycleTheme(cycleTheme);
+trackerApi.onCycleTheme(cycleTheme);
+
+function createTrackerApi() {
+  if (window.tracker) return window.tracker;
+  const invoke = window.__TAURI__?.core?.invoke;
+  if (!invoke) {
+    throw new Error("No desktop runtime API is available");
+  }
+  return {
+    getState: () => invoke("get_state"),
+    getStats: () => invoke("get_stats"),
+    addEvent: (payload) => invoke("add_event", {
+      eventType: payload.type,
+      reason: payload.reason || null,
+      note: payload.note || null
+    }),
+    addCategory: (name) => invoke("add_category", { name }),
+    exportToday: async () => {
+      const filePath = await invoke("export_today");
+      if (filePath) alert(`Exported workbook:\n${filePath}`);
+      return filePath;
+    },
+    onNavigate: () => {},
+    onCycleTheme: () => {}
+  };
+}
 
 applyTheme(currentTheme());
 setInterval(refreshComputedTime, 1000);
