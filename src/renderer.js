@@ -281,6 +281,7 @@ trackerApi.onCycleTheme(cycleTheme);
 function createTrackerApi() {
   if (window.tracker) return window.tracker;
   const invoke = window.__TAURI__?.core?.invoke;
+  const listen = window.__TAURI__?.event?.listen;
   if (!invoke) {
     throw new Error("No desktop runtime API is available");
   }
@@ -298,8 +299,15 @@ function createTrackerApi() {
       if (filePath) alert(`Exported workbook:\n${filePath}`);
       return filePath;
     },
-    onNavigate: () => {},
-    onCycleTheme: () => {}
+    onNavigate: (callback) => {
+      if (listen) listen("menu:navigate", (event) => callback(event.payload));
+    },
+    onCycleTheme: (callback) => {
+      if (listen) listen("menu:cycle-theme", callback);
+      if (listen) listen("menu:help", () => {
+        alert("Use Start Work to begin tracking. Use pause category buttons or the Timer menu to pause with a reason. Stats show daily, weekly, and monthly totals. Export XLSX creates separate workbook sheets for raw segments and summary stats.");
+      });
+    }
   };
 }
 

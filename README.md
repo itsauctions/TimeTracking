@@ -1,6 +1,6 @@
 # Workday Time Tracker
 
-A small Windows-first desktop time tracker with a large-button UI, local SQLite storage, on-demand CSV export, and system tray behavior.
+A small Windows-first desktop time tracker with a large-button UI, local SQLite storage, on-demand XLSX export, and system tray behavior.
 
 ## Current Features
 
@@ -9,8 +9,21 @@ A small Windows-first desktop time tracker with a large-button UI, local SQLite 
 - Live work time, paused time, and current clock display.
 - Fixed pause presets with a settings menu for adding custom categories.
 - SQLite database stored in Electron's user data folder.
-- CSV export only when requested.
+- XLSX export only when requested.
 - Closing the window hides it to the tray instead of quitting.
+
+## Recommended Build
+
+Version `0.2.0` adds a Tauri build. This is the recommended app path because it starts faster and bundles much smaller than Electron.
+
+Built artifacts:
+
+```text
+dist/tauri/Workday Time Tracker_0.2.0_x64-setup.exe
+dist/tauri/workday-time-tracker-0.2.0.exe
+```
+
+Use the setup exe for normal installation. The raw exe is useful for quick local testing.
 
 ## Run
 
@@ -19,15 +32,29 @@ npm install
 npm start
 ```
 
+## Build With Tauri
+
+Windows prerequisites:
+
+- Node.js LTS
+- Rustup/Cargo
+- Visual Studio Build Tools with the C++ workload
+
+Build:
+
+```bash
+npm run tauri:build
+```
+
 Because `better-sqlite3` is a native module, keep the `postinstall` rebuild step in `package.json`. It rebuilds SQLite for Electron's runtime.
 
-## Package For Windows
+## Package Electron For Windows
 
 ```bash
 npm run package:win
 ```
 
-The package script creates a portable Windows build through Electron Builder.
+The package script creates the older Electron portable Windows build through Electron Builder. Use this only as a fallback.
 
 ## Local Data
 

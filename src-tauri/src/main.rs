@@ -1,11 +1,14 @@
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+
 use chrono::{Datelike, Local, TimeZone, Utc};
 use rusqlite::{params, Connection};
 use serde::Serialize;
 use std::collections::BTreeMap;
-use std::fs::{self, File};
+use std::fs;
 use std::io::{Cursor, Write};
 use std::path::PathBuf;
-use tauri::{AppHandle, Manager};
+use tauri::menu::{MenuBuilder, SubmenuBuilder};
+use tauri::{AppHandle, Emitter, Manager};
 use zip::write::FileOptions;
 
 const DEFAULT_CATEGORIES: [&str; 6] = ["Bathroom", "Family", "Break", "Admin", "Meal", "Other"];
@@ -330,13 +333,18 @@ fn get_stats(app: AppHandle) -> Result<Stats, String> {
 
 #[tauri::command]
 fn add_event(app: AppHandle, event_type: String, reason: Option<String>, note: Option<String>) -> Result<State, String> {
+    add_event_record(&app, &event_type, reason, note)?;
+    get_state(app)
+}
+
+fn add_event_record(app: &AppHandle, event_type: &str, reason: Option<String>, note: Option<String>) -> Result<(), String> {
     let conn = open_db(&app)?;
     conn.execute(
         "INSERT INTO events (event_type, reason, note, occurred_at) VALUES (?1, ?2, ?3, ?4)",
         params![event_type, reason, note, Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true)],
     )
     .map_err(|err| err.to_string())?;
-    get_state(app)
+    Ok(())
 }
 
 #[tauri::command]
@@ -367,8 +375,16 @@ fn export_today(app: AppHandle) -> Result<String, String> {
 }
 
 fn create_workbook(segments: &[Segment], stats: &Stats) -> Result<Vec<u8>, String> {
-    let segment_rows = std::iter::once(vec!["date", "segment_start", "segment_end", "segment_type", "pause_reason", "note", "duration_minutes"])
-        .chain(segments.iter().map(|segment| vec![
+    let mut segment_rows = vec![vec![
+        "date".into(),
+        "segment_start".into(),
+        "segment_end".into(),
+        "segment_type".into(),
+        "pause_reason".into(),
+        "note".into(),
+        "duration_minutes".into(),
+    ]];
+    segment_rows.extend(segments.iter().map(|segment| vec![
             segment.start[0..10].into(),
             segment.start.clone(),
             segment.end.clone(),
@@ -376,8 +392,7 @@ fn create_workbook(segments: &[Segment], stats: &Stats) -> Result<Vec<u8>, Strin
             segment.reason.clone(),
             segment.note.clone(),
             segment.duration_minutes.to_string(),
-        ]))
-        .collect::<Vec<_>>();
+        ]));
     let summary_rows = summary_rows("day", &stats.days)
         .into_iter()
         .chain(summary_rows("week", &stats.weeks))
@@ -420,24 +435,27 @@ fn mins(ms: i64) -> String {
 fn write_xlsx(sheets: Vec<(&str, Vec<Vec<String>>)>) -> Result<Vec<u8>, String> {
     let mut out = Cursor::new(Vec::new());
     let mut zip = zip::ZipWriter::new(&mut out);
-    let options = FileOptions::default().compression_method(zip::CompressionMethod::Deflated);
     let sheet_overrides = (1..=sheets.len()).map(|i| format!(r#"<Override PartName="/xl/worksheets/sheet{i}.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>"#)).collect::<String>();
-    zip.start_file("[Content_Types].xml", options).map_err(|err| err.to_string())?;
+    zip.start_file("[Content_Types].xml", zip_options()).map_err(|err| err.to_string())?;
     write!(zip, r#"<?xml version="1.0" encoding="UTF-8"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>{sheet_overrides}</Types>"#).map_err(|err| err.to_string())?;
-    zip.start_file("_rels/.rels", options).map_err(|err| err.to_string())?;
+    zip.start_file("_rels/.rels", zip_options()).map_err(|err| err.to_string())?;
     write!(zip, r#"<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>"#).map_err(|err| err.to_string())?;
     let sheet_tags = sheets.iter().enumerate().map(|(idx, sheet)| format!(r#"<sheet name="{}" sheetId="{}" r:id="rId{}"/>"#, xml_escape(sheet.0), idx + 1, idx + 1)).collect::<String>();
-    zip.start_file("xl/workbook.xml", options).map_err(|err| err.to_string())?;
+    zip.start_file("xl/workbook.xml", zip_options()).map_err(|err| err.to_string())?;
     write!(zip, r#"<?xml version="1.0" encoding="UTF-8"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets>{sheet_tags}</sheets></workbook>"#).map_err(|err| err.to_string())?;
     let rels = (1..=sheets.len()).map(|i| format!(r#"<Relationship Id="rId{i}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet{i}.xml"/>"#)).collect::<String>();
-    zip.start_file("xl/_rels/workbook.xml.rels", options).map_err(|err| err.to_string())?;
+    zip.start_file("xl/_rels/workbook.xml.rels", zip_options()).map_err(|err| err.to_string())?;
     write!(zip, r#"<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">{rels}</Relationships>"#).map_err(|err| err.to_string())?;
     for (idx, sheet) in sheets.iter().enumerate() {
-        zip.start_file(format!("xl/worksheets/sheet{}.xml", idx + 1), options).map_err(|err| err.to_string())?;
+        zip.start_file(format!("xl/worksheets/sheet{}.xml", idx + 1), zip_options()).map_err(|err| err.to_string())?;
         write!(zip, "{}", sheet_xml(&sheet.1)).map_err(|err| err.to_string())?;
     }
     zip.finish().map_err(|err| err.to_string())?;
     Ok(out.into_inner())
+}
+
+fn zip_options() -> FileOptions<'static, ()> {
+    FileOptions::default().compression_method(zip::CompressionMethod::Deflated)
 }
 
 fn sheet_xml(rows: &[Vec<String>]) -> String {
@@ -466,7 +484,107 @@ fn xml_escape(value: &str) -> String {
 
 fn main() {
     tauri::Builder::default()
+        .setup(|app| {
+            let menu = build_app_menu(app.handle())?;
+            app.set_menu(menu)?;
+            Ok(())
+        })
+        .on_menu_event(|app, event| {
+            let id = event.id().as_ref();
+            match id {
+                "show_timer" => emit_nav(app, "timer"),
+                "show_stats" => emit_nav(app, "stats"),
+                "next_theme" => {
+                    let _ = app.emit("menu:cycle-theme", ());
+                }
+                "export_xlsx" => {
+                    let _ = export_today(app.clone());
+                }
+                "start_work" => {
+                    let _ = add_event_record(app, "start", None, None);
+                }
+                "resume_work" => {
+                    let _ = add_event_record(app, "resume", None, None);
+                }
+                "pause_bathroom" => pause_from_menu(app, "Bathroom"),
+                "pause_family" => pause_from_menu(app, "Family"),
+                "pause_break" => pause_from_menu(app, "Break"),
+                "pause_admin" => pause_from_menu(app, "Admin"),
+                "pause_meal" => pause_from_menu(app, "Meal"),
+                "pause_other" => pause_from_menu(app, "Other"),
+                "end_day" => {
+                    let _ = add_event_record(app, "stop", None, None);
+                }
+                "hide_to_tray" => {
+                    if let Some(window) = app.get_webview_window("main") {
+                        let _ = window.hide();
+                    }
+                }
+                "help" => {
+                    let _ = app.emit("menu:help", ());
+                }
+                "quit" => app.exit(0),
+                _ => {}
+            }
+        })
         .invoke_handler(tauri::generate_handler![get_state, get_stats, add_event, add_category, export_today])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+fn build_app_menu(app: &AppHandle) -> tauri::Result<tauri::menu::Menu<tauri::Wry>> {
+    let status = SubmenuBuilder::new(app, "Ready")
+        .text("show_timer", "Show Timer")
+        .text("show_stats", "Show Stats")
+        .build()?;
+    let file = SubmenuBuilder::new(app, "File")
+        .text("export_xlsx", "Export XLSX")
+        .separator()
+        .text("quit", "Quit")
+        .build()?;
+    let pause_for = SubmenuBuilder::new(app, "Pause For")
+        .text("pause_bathroom", "Bathroom")
+        .text("pause_family", "Family")
+        .text("pause_break", "Break")
+        .text("pause_admin", "Admin")
+        .text("pause_meal", "Meal")
+        .text("pause_other", "Other")
+        .build()?;
+    let timer = SubmenuBuilder::new(app, "Timer")
+        .text("start_work", "Start Work")
+        .text("resume_work", "Resume")
+        .item(&pause_for)
+        .text("end_day", "End Day")
+        .build()?;
+    let view = SubmenuBuilder::new(app, "View")
+        .text("show_timer", "Timer")
+        .text("show_stats", "Stats")
+        .text("next_theme", "Next Theme")
+        .build()?;
+    let window = SubmenuBuilder::new(app, "Window")
+        .text("hide_to_tray", "Hide To Tray")
+        .build()?;
+    let help = SubmenuBuilder::new(app, "Help")
+        .text("help", "How This Works")
+        .build()?;
+    MenuBuilder::new(app)
+        .item(&status)
+        .item(&file)
+        .item(&timer)
+        .item(&view)
+        .item(&window)
+        .item(&help)
+        .build()
+}
+
+fn emit_nav(app: &AppHandle, page: &str) {
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.show();
+        let _ = window.set_focus();
+    }
+    let _ = app.emit("menu:navigate", page);
+}
+
+fn pause_from_menu(app: &AppHandle, reason: &str) {
+    let _ = add_event_record(app, "pause", Some(reason.into()), None);
 }
