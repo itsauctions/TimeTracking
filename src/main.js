@@ -41,6 +41,11 @@ function openDatabase() {
       is_default INTEGER NOT NULL DEFAULT 0,
       created_at TEXT NOT NULL
     );
+
+    CREATE TABLE IF NOT EXISTS settings (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL
+    );
   `);
 
   const insertCategory = db.prepare(`
@@ -51,24 +56,89 @@ function openDatabase() {
   for (const category of DEFAULT_CATEGORIES) {
     insertCategory.run(category, 1, now);
   }
+  db.prepare(`
+    INSERT OR IGNORE INTO settings (key, value)
+    VALUES ('timeZone', ?)
+  `).run(Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC");
 }
 
-function todayKey(date = new Date()) {
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
+function getSetting(key, fallback) {
+  return db.prepare("SELECT value FROM settings WHERE key = ?").get(key)?.value || fallback;
+}
+
+function settings() {
+  return {
+    timeZone: getSetting("timeZone", Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC")
+  };
+}
+
+function setSetting(key, value) {
+  db.prepare(`
+    INSERT INTO settings (key, value)
+    VALUES (?, ?)
+    ON CONFLICT(key) DO UPDATE SET value = excluded.value
+  `).run(key, value);
+}
+
+function validateTimeZone(timeZone) {
+  try {
+    Intl.DateTimeFormat(undefined, { timeZone }).format(new Date());
+    return timeZone;
+  } catch {
+    return "UTC";
+  }
+}
+
+function datePartsInZone(date = new Date(), timeZone = settings().timeZone) {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hourCycle: "h23"
+  }).formatToParts(date);
+  const values = Object.fromEntries(parts.filter((part) => part.type !== "literal").map((part) => [part.type, part.value]));
+  return {
+    year: Number(values.year),
+    month: Number(values.month),
+    day: Number(values.day),
+    hour: Number(values.hour),
+    minute: Number(values.minute),
+    second: Number(values.second)
+  };
+}
+
+function todayKey(date = new Date(), timeZone = settings().timeZone) {
+  const parts = datePartsInZone(date, timeZone);
+  const year = parts.year;
+  const month = String(parts.month).padStart(2, "0");
+  const day = String(parts.day).padStart(2, "0");
   return `${year}-${month}-${day}`;
 }
 
-function localDayRange(date = new Date()) {
-  const start = new Date(date.getFullYear(), date.getMonth(), date.getDate());
-  const end = new Date(start);
-  end.setDate(end.getDate() + 1);
+function zonedTimeToUtc(year, month, day, hour, minute, second, timeZone) {
+  const guess = Date.UTC(year, month - 1, day, hour, minute, second);
+  const firstParts = datePartsInZone(new Date(guess), timeZone);
+  const firstAsUtc = Date.UTC(firstParts.year, firstParts.month - 1, firstParts.day, firstParts.hour, firstParts.minute, firstParts.second);
+  const adjusted = guess - (firstAsUtc - guess);
+  const secondParts = datePartsInZone(new Date(adjusted), timeZone);
+  const secondAsUtc = Date.UTC(secondParts.year, secondParts.month - 1, secondParts.day, secondParts.hour, secondParts.minute, secondParts.second);
+  return new Date(adjusted - (secondAsUtc - guess));
+}
+
+function dayRangeForKey(dayKeyValue = todayKey(), timeZone = settings().timeZone) {
+  const [year, month, day] = String(dayKeyValue).split("-").map(Number);
+  const start = zonedTimeToUtc(year, month, day, 0, 0, 0, timeZone);
+  const nextDay = new Date(Date.UTC(year, month - 1, day + 1));
+  const end = zonedTimeToUtc(nextDay.getUTCFullYear(), nextDay.getUTCMonth() + 1, nextDay.getUTCDate(), 0, 0, 0, timeZone);
   return { start: start.toISOString(), end: end.toISOString() };
 }
 
-function todayEvents() {
-  const range = localDayRange();
+function todayEvents(timeZone = settings().timeZone) {
+  const range = dayRangeForKey(todayKey(new Date(), timeZone), timeZone);
   return eventsBetween(range.start, range.end);
 }
 
@@ -89,6 +159,16 @@ function allEvents() {
   `).all();
 }
 
+function eventDayKeys(timeZone = settings().timeZone) {
+  return db.prepare(`
+    SELECT occurred_at AS occurredAt
+    FROM events
+    ORDER BY occurred_at DESC, id DESC
+  `).all()
+    .map((event) => todayKey(new Date(event.occurredAt), timeZone))
+    .filter((key, index, keys) => keys.indexOf(key) === index);
+}
+
 function categories() {
   return db.prepare(`
     SELECT id, name, is_default AS isDefault
@@ -98,7 +178,8 @@ function categories() {
 }
 
 function currentState() {
-  const events = todayEvents();
+  const appSettings = settings();
+  const events = todayEvents(appSettings.timeZone);
   const latest = events.at(-1);
   let status = "idle";
   if (latest) {
@@ -112,6 +193,7 @@ function currentState() {
     activeSince: status === "working" || status === "paused" ? latest.occurredAt : null,
     events,
     categories: categories(),
+    settings: appSettings,
     totals: calculateTotals(events)
   };
 }
@@ -175,7 +257,8 @@ function calculateTotals(events, now = new Date()) {
   return { workMs, pauseMs, segments };
 }
 
-function statsSummary() {
+function statsSummary(range = {}) {
+  const timeZone = settings().timeZone;
   const segments = calculateTotals(allEvents()).segments;
   const days = new Map();
   const weeks = new Map();
@@ -183,26 +266,128 @@ function statsSummary() {
 
   for (const segment of segments) {
     const start = new Date(segment.start);
-    addSegmentStats(days, todayKey(start), segment);
-    addSegmentStats(weeks, weekKey(start), segment);
-    addSegmentStats(months, monthKey(start), segment);
+    addSegmentStats(days, todayKey(start, timeZone), segment);
+    addSegmentStats(weeks, weekKey(start, timeZone), segment);
+    addSegmentStats(months, monthKey(start, timeZone), segment);
   }
 
   return {
     days: Array.from(days.values()).sort((a, b) => b.key.localeCompare(a.key)),
     weeks: Array.from(weeks.values()).sort((a, b) => b.key.localeCompare(a.key)),
-    months: Array.from(months.values()).sort((a, b) => b.key.localeCompare(a.key))
+    months: Array.from(months.values()).sort((a, b) => b.key.localeCompare(a.key)),
+    chart: chartSummary(segments, range)
   };
 }
 
-function weekKey(date) {
-  const start = new Date(date.getFullYear(), date.getMonth(), date.getDate());
-  start.setDate(start.getDate() - start.getDay());
-  return todayKey(start);
+function weekKey(date, timeZone = settings().timeZone) {
+  const key = todayKey(date, timeZone);
+  const [year, month, day] = key.split("-").map(Number);
+  const dateOnly = new Date(Date.UTC(year, month - 1, day));
+  dateOnly.setUTCDate(dateOnly.getUTCDate() - dateOnly.getUTCDay());
+  return `${dateOnly.getUTCFullYear()}-${String(dateOnly.getUTCMonth() + 1).padStart(2, "0")}-${String(dateOnly.getUTCDate()).padStart(2, "0")}`;
 }
 
-function monthKey(date) {
-  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
+function monthKey(date, timeZone = settings().timeZone) {
+  const parts = datePartsInZone(date, timeZone);
+  return `${parts.year}-${String(parts.month).padStart(2, "0")}`;
+}
+
+function dayKeyToDate(dayKeyValue) {
+  const [year, month, day] = String(dayKeyValue || "").split("-").map(Number);
+  if (!year || !month || !day) return null;
+  return new Date(Date.UTC(year, month - 1, day));
+}
+
+function addDaysToKey(dayKeyValue, days) {
+  const date = dayKeyToDate(dayKeyValue);
+  if (!date) return todayKey();
+  date.setUTCDate(date.getUTCDate() + days);
+  return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, "0")}-${String(date.getUTCDate()).padStart(2, "0")}`;
+}
+
+function parseStatsRange(range = {}, timeZone = settings().timeZone) {
+  const defaultEnd = todayKey(new Date(), timeZone);
+  const defaultStart = addDaysToKey(defaultEnd, -6);
+  let startDay = /^\d{4}-\d{2}-\d{2}$/.test(range.startDay) ? range.startDay : defaultStart;
+  let endDay = /^\d{4}-\d{2}-\d{2}$/.test(range.endDay) ? range.endDay : defaultEnd;
+  if (endDay < startDay) {
+    [startDay, endDay] = [endDay, startDay];
+  }
+  const startMinute = Number.isFinite(range.startMinute)
+    ? Math.max(0, Math.min(1439, Math.floor(range.startMinute)))
+    : 6 * 60;
+  let endMinute = Number.isFinite(range.endMinute)
+    ? Math.max(1, Math.min(1440, Math.floor(range.endMinute)))
+    : 20 * 60;
+  if (endMinute <= startMinute) {
+    endMinute = Math.min(1440, startMinute + 60);
+  }
+  return { startDay, endDay, startMinute, endMinute };
+}
+
+function minuteOfDayInZone(date, timeZone) {
+  const parts = datePartsInZone(date, timeZone);
+  return (parts.hour * 60) + parts.minute + (parts.second / 60);
+}
+
+function localMinuteBoundary(dayKeyValue, minute, timeZone) {
+  const [year, month, day] = dayKeyValue.split("-").map(Number);
+  const hour = Math.floor(minute / 60);
+  const localMinute = minute % 60;
+  if (minute >= 1440) {
+    const nextDay = addDaysToKey(dayKeyValue, 1);
+    const [nextYear, nextMonth, nextDate] = nextDay.split("-").map(Number);
+    return zonedTimeToUtc(nextYear, nextMonth, nextDate, 0, 0, 0, timeZone);
+  }
+  return zonedTimeToUtc(year, month, day, hour, localMinute, 0, timeZone);
+}
+
+function chartSummary(segments, rangeInput = {}) {
+  const timeZone = settings().timeZone;
+  const range = parseStatsRange(rangeInput, timeZone);
+  const days = new Map();
+  for (let dayKeyValue = range.startDay; dayKeyValue <= range.endDay; dayKeyValue = addDaysToKey(dayKeyValue, 1)) {
+    days.set(dayKeyValue, {
+      key: dayKeyValue,
+      workMs: 0,
+      pauseMs: 0,
+      segments: []
+    });
+  }
+
+  for (const segment of segments) {
+    const segmentStart = new Date(segment.start);
+    const segmentEnd = new Date(segment.end);
+    if (Number.isNaN(segmentStart.getTime()) || Number.isNaN(segmentEnd.getTime())) continue;
+
+    for (const [dayKeyValue, day] of days) {
+      const windowStart = localMinuteBoundary(dayKeyValue, range.startMinute, timeZone);
+      const windowEnd = localMinuteBoundary(dayKeyValue, range.endMinute, timeZone);
+
+      const clippedStart = new Date(Math.max(segmentStart.getTime(), windowStart.getTime()));
+      const clippedEnd = new Date(Math.min(segmentEnd.getTime(), windowEnd.getTime()));
+      if (clippedEnd <= clippedStart) continue;
+
+      const durationMs = clippedEnd - clippedStart;
+      if (segment.type === "work") day.workMs += durationMs;
+      if (segment.type === "pause") day.pauseMs += durationMs;
+      day.segments.push({
+        type: segment.type,
+        reason: segment.reason || "",
+        start: clippedStart.toISOString(),
+        end: clippedEnd.toISOString(),
+        startMinute: Math.max(range.startMinute, minuteOfDayInZone(clippedStart, timeZone)),
+        endMinute: Math.min(range.endMinute, minuteOfDayInZone(clippedEnd, timeZone)),
+        durationMs
+      });
+    }
+  }
+
+  return {
+    timeZone,
+    range,
+    days: Array.from(days.values()).sort((a, b) => b.key.localeCompare(a.key))
+  };
 }
 
 function addSegmentStats(map, key, segment) {
@@ -284,6 +469,7 @@ function minutes(ms) {
 }
 
 function exportWorkbook() {
+  const timeZone = settings().timeZone;
   const segments = calculateTotals(allEvents()).segments;
   const stats = statsSummary();
   const segmentRows = [
@@ -297,7 +483,7 @@ function exportWorkbook() {
       "duration_minutes"
     ],
     ...segments.map((segment) => [
-      todayKey(new Date(segment.start)),
+      todayKey(new Date(segment.start), timeZone),
       segment.start,
       segment.end,
       segment.type,
@@ -518,12 +704,53 @@ function crc32(buffer) {
 async function exportWorkbookWithDialog() {
   const result = await dialog.showSaveDialog(mainWindow, {
     title: "Export time workbook",
-    defaultPath: `workday-time-export-${todayKey()}.xlsx`,
+    defaultPath: `workday-time-export-${todayKey(new Date(), settings().timeZone)}.xlsx`,
     filters: [{ name: "Excel Workbook", extensions: ["xlsx"] }]
   });
   if (result.canceled || !result.filePath) return { canceled: true };
   fs.writeFileSync(result.filePath, exportWorkbook());
   return { canceled: false, filePath: result.filePath };
+}
+
+function historyForDay(dayKeyValue = todayKey()) {
+  const timeZone = settings().timeZone;
+  const range = dayRangeForKey(dayKeyValue, timeZone);
+  const events = eventsBetween(range.start, range.end);
+  return {
+    selectedDay: dayKeyValue,
+    days: eventDayKeys(timeZone),
+    events,
+    segments: calculateTotals(events, new Date(range.end)).segments,
+    settings: settings()
+  };
+}
+
+function deleteEvent(id) {
+  const eventId = Number(id);
+  if (Number.isInteger(eventId)) {
+    db.prepare("DELETE FROM events WHERE id = ?").run(eventId);
+  }
+  updateTray();
+  updateAppMenu();
+  return currentState();
+}
+
+function deleteEventsForDay(dayKeyValue) {
+  const range = dayRangeForKey(dayKeyValue, settings().timeZone);
+  db.prepare("DELETE FROM events WHERE occurred_at >= ? AND occurred_at < ?").run(range.start, range.end);
+  updateTray();
+  updateAppMenu();
+  return currentState();
+}
+
+function deleteEventsForPeriod(start, end) {
+  const startDate = new Date(start);
+  const endDate = new Date(end);
+  if (Number.isNaN(startDate.getTime()) || Number.isNaN(endDate.getTime())) return currentState();
+  db.prepare("DELETE FROM events WHERE occurred_at >= ? AND occurred_at <= ?").run(startDate.toISOString(), endDate.toISOString());
+  updateTray();
+  updateAppMenu();
+  return currentState();
 }
 
 function createWindow() {
@@ -604,6 +831,7 @@ function trayMenuTemplate(state, text) {
     { label: "End Day", enabled: state.status !== "idle" && state.status !== "stopped", click: () => addEvent("stop") },
     { type: "separator" },
     { label: "Stats", click: () => sendNavigation("stats") },
+    { label: "History", click: () => sendNavigation("history") },
     { label: "Export XLSX", click: exportWorkbookWithDialog },
     { type: "separator" },
     {
@@ -644,7 +872,8 @@ function updateAppMenu() {
       label: statusText(state),
       submenu: [
         { label: "Show Timer", click: () => sendNavigation("timer") },
-        { label: "Show Stats", click: () => sendNavigation("stats") }
+        { label: "Show Stats", click: () => sendNavigation("stats") },
+        { label: "Show History", click: () => sendNavigation("history") }
       ]
     },
     {
@@ -675,6 +904,7 @@ function updateAppMenu() {
       submenu: [
         { label: "Timer", click: () => sendNavigation("timer") },
         { label: "Stats", click: () => sendNavigation("stats") },
+        { label: "History", click: () => sendNavigation("history") },
         { label: "Next Theme", click: () => mainWindow?.webContents.send("menu:cycleTheme") },
         { type: "separator" },
         { role: "reload" },
@@ -723,8 +953,12 @@ function sendNavigation(page) {
 }
 
 ipcMain.handle("state:get", () => currentState());
-ipcMain.handle("stats:get", () => statsSummary());
+ipcMain.handle("stats:get", (_event, range) => statsSummary(range));
+ipcMain.handle("history:get", (_event, dayKeyValue) => historyForDay(dayKeyValue || todayKey()));
 ipcMain.handle("event:add", (_event, payload) => addEvent(payload.type, payload.reason, payload.note));
+ipcMain.handle("event:delete", (_event, id) => deleteEvent(id));
+ipcMain.handle("events:deleteDay", (_event, dayKeyValue) => deleteEventsForDay(dayKeyValue));
+ipcMain.handle("events:deletePeriod", (_event, payload) => deleteEventsForPeriod(payload.start, payload.end));
 ipcMain.handle("category:add", (_event, name) => {
   const cleanName = String(name || "").trim();
   if (!cleanName) return currentState();
@@ -732,10 +966,27 @@ ipcMain.handle("category:add", (_event, name) => {
     INSERT OR IGNORE INTO categories (name, is_default, created_at)
     VALUES (?, 0, ?)
   `).run(cleanName, new Date().toISOString());
+  updateTray();
+  updateAppMenu();
+  return currentState();
+});
+ipcMain.handle("category:delete", (_event, id) => {
+  const categoryId = Number(id);
+  if (!Number.isInteger(categoryId)) return currentState();
+  db.prepare("DELETE FROM categories WHERE id = ?").run(categoryId);
+  updateTray();
+  updateAppMenu();
   return currentState();
 });
 ipcMain.handle("csv:exportToday", async () => {
   return exportWorkbookWithDialog();
+});
+ipcMain.handle("settings:update", (_event, payload) => {
+  const timeZone = validateTimeZone(String(payload?.timeZone || ""));
+  setSetting("timeZone", timeZone);
+  updateTray();
+  updateAppMenu();
+  return currentState();
 });
 
 app.whenReady().then(() => {

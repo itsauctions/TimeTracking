@@ -268,10 +268,23 @@ input {
 }
 
 #exportButton,
-#addCategoryButton {
+#addCategoryButton,
+#saveSettingsButton,
+.danger-button {
   min-height: 40px;
   padding: 0 14px;
   font-weight: 700;
+}
+
+.danger-button {
+  border-color: var(--red);
+  color: var(--red);
+}
+
+.compact-button {
+  min-height: 34px;
+  padding: 0 12px;
+  white-space: nowrap;
 }
 
 .event-list {
@@ -326,16 +339,46 @@ dialog::backdrop {
 }
 
 .category-list {
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
   gap: 8px;
 }
 
-.category-list span {
+.category-pill {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+  justify-content: space-between;
   border: 1px solid var(--line);
   border-radius: 8px;
   padding: 8px 10px;
   background: var(--paper);
+}
+
+.category-pill span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.category-delete {
+  align-items: center;
+  background: transparent;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--muted);
+  cursor: pointer;
+  display: inline-flex;
+  flex: 0 0 28px;
+  font-size: 18px;
+  height: 28px;
+  justify-content: center;
+  line-height: 1;
+  padding: 0;
+  width: 28px;
+}
+
+.category-delete:hover {
+  border-color: var(--red);
+  color: var(--red);
 }
 
 .hidden {
@@ -348,10 +391,141 @@ dialog::backdrop {
   padding: 22px;
 }
 
+.history-page {
+  padding: 22px;
+}
+
 .stats-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 18px;
+}
+
+.stats-range-head {
+  align-items: flex-start;
+}
+
+.stats-range-controls {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(112px, 1fr));
+  gap: 10px;
+  min-width: min(620px, 100%);
+}
+
+.stats-range-controls label {
+  display: grid;
+  gap: 4px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.day-chart {
+  display: grid;
+  gap: 10px;
+  margin-top: 18px;
+}
+
+.timeline-row {
+  display: grid;
+  grid-template-columns: 190px minmax(0, 1fr);
+  gap: 12px;
+  align-items: center;
+}
+
+.timeline-label {
+  min-width: 0;
+}
+
+.timeline-label strong,
+.timeline-label span {
+  display: block;
+}
+
+.timeline-label span {
+  color: var(--muted);
+  font-size: 13px;
+  margin-top: 2px;
+}
+
+.timeline-track {
+  position: relative;
+  min-height: 34px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background:
+    linear-gradient(to right, transparent calc(25% - 1px), var(--line) 25%, transparent calc(25% + 1px)),
+    linear-gradient(to right, transparent calc(50% - 1px), var(--line) 50%, transparent calc(50% + 1px)),
+    linear-gradient(to right, transparent calc(75% - 1px), var(--line) 75%, transparent calc(75% + 1px)),
+    var(--paper);
+}
+
+.timeline-segment {
+  position: absolute;
+  top: 6px;
+  bottom: 6px;
+  border-radius: 5px;
+}
+
+.work-segment {
+  background: var(--green);
+}
+
+.pause-segment {
+  background: var(--yellow);
+}
+
+.timeline-empty {
+  display: block;
+  padding: 8px 12px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.history-head {
+  align-items: flex-start;
+}
+
+.history-controls {
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+}
+
+.subtle {
+  color: var(--muted);
+  margin: 4px 0 0;
+}
+
+.history-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 18px;
+  margin-top: 18px;
+}
+
+.history-grid h3 {
+  margin: 0 0 10px;
+  font-size: 16px;
+}
+
+.history-list {
+  display: grid;
+  gap: 10px;
+}
+
+.history-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+}
+
+.history-row small {
+  grid-column: 1 / -1;
 }
 
 .stats-section {
@@ -460,7 +634,11 @@ dialog::backdrop {
 
   .time-grid,
   .actions,
-  .stats-grid {
+  .stats-grid,
+  .history-grid,
+  .history-controls,
+  .stats-range-controls,
+  .timeline-row {
     grid-template-columns: 1fr;
   }
 

@@ -11,6 +11,7 @@
     <nav class="app-nav" aria-label="Main">
       <button class="tab-button active" id="timerTab" type="button">Timer</button>
       <button class="tab-button" id="statsTab" type="button">Stats</button>
+      <button class="tab-button" id="historyTab" type="button">History</button>
       <button class="tab-button theme-button" id="themeButton" type="button">Theme</button>
       <button class="icon-button" id="settingsButton" title="Settings" aria-label="Settings">⚙</button>
     </nav>
@@ -65,7 +66,59 @@
       </section>
     </main>
 
+    <main class="history-page hidden" id="historyPage">
+      <section class="stats-section">
+        <div class="panel-head history-head">
+          <div>
+            <h2>History</h2>
+            <p class="subtle" id="historyDateLabel"></p>
+          </div>
+          <div class="history-controls">
+            <select id="historyDaySelect" aria-label="History day"></select>
+            <button class="danger-button" id="deleteDayButton" type="button">Delete Day</button>
+          </div>
+        </div>
+        <div class="history-grid">
+          <section>
+            <h3>Entries</h3>
+            <div class="history-list" id="historyEvents"></div>
+          </section>
+          <section>
+            <h3>Time Periods</h3>
+            <div class="history-list" id="historySegments"></div>
+          </section>
+        </div>
+      </section>
+    </main>
+
     <main class="stats-page hidden" id="statsPage">
+      <section class="stats-section">
+        <div class="panel-head stats-range-head">
+          <div>
+            <h2>Day Timeline</h2>
+            <p class="subtle" id="statsTimezoneLabel"></p>
+          </div>
+          <div class="stats-range-controls">
+            <label>
+              <span>From</span>
+              <input id="statsStartDate" type="date">
+            </label>
+            <label>
+              <span>To</span>
+              <input id="statsEndDate" type="date">
+            </label>
+            <label>
+              <span>Start</span>
+              <input id="statsStartTime" type="time" step="900">
+            </label>
+            <label>
+              <span>End</span>
+              <input id="statsEndTime" type="time" step="900">
+            </label>
+          </div>
+        </div>
+        <div class="day-chart" id="dayTimelineChart"></div>
+      </section>
       <section class="stats-section">
         <div class="panel-head">
           <h2>Daily Stats</h2>
@@ -89,6 +142,11 @@
         <div class="panel-head">
           <h2>Settings</h2>
           <button class="icon-button" value="close" title="Close" aria-label="Close">×</button>
+        </div>
+        <label for="timezoneSelect">Timezone</label>
+        <div class="inline-form">
+          <select id="timezoneSelect"></select>
+          <button id="saveSettingsButton" type="button">Save</button>
         </div>
         <label for="categoryInput">New pause category</label>
         <div class="inline-form">

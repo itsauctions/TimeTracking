@@ -362,6 +362,14 @@ fn add_category(app: AppHandle, name: String) -> Result<State, String> {
 }
 
 #[tauri::command]
+fn delete_category(app: AppHandle, id: i64) -> Result<State, String> {
+    let conn = open_db(&app)?;
+    conn.execute("DELETE FROM categories WHERE id = ?1", params![id])
+        .map_err(|err| err.to_string())?;
+    get_state(app)
+}
+
+#[tauri::command]
 fn export_today(app: AppHandle) -> Result<String, String> {
     let conn = open_db(&app)?;
     let totals = calculate_totals(&all_events(&conn)?);
@@ -527,7 +535,7 @@ fn main() {
                 _ => {}
             }
         })
-        .invoke_handler(tauri::generate_handler![get_state, get_stats, add_event, add_category, export_today])
+        .invoke_handler(tauri::generate_handler![get_state, get_stats, add_event, add_category, delete_category, export_today])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
