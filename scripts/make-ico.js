@@ -151,6 +151,97 @@ function resizeArea(image, size) {
   return { width: size, height: size, pixels };
 }
 
+function blendPixel(image, x, y, color, coverage = 1) {
+  if (x < 0 || y < 0 || x >= image.width || y >= image.height || coverage <= 0) return;
+
+  const targetIndex = (y * image.width + x) * 4;
+  const sourceAlpha = (color[3] / 255) * Math.min(1, coverage);
+  const targetAlpha = image.pixels[targetIndex + 3] / 255;
+  const outAlpha = sourceAlpha + targetAlpha * (1 - sourceAlpha);
+
+  if (outAlpha <= 0) return;
+
+  image.pixels[targetIndex] = clampByte((color[0] * sourceAlpha + image.pixels[targetIndex] * targetAlpha * (1 - sourceAlpha)) / outAlpha);
+  image.pixels[targetIndex + 1] = clampByte((color[1] * sourceAlpha + image.pixels[targetIndex + 1] * targetAlpha * (1 - sourceAlpha)) / outAlpha);
+  image.pixels[targetIndex + 2] = clampByte((color[2] * sourceAlpha + image.pixels[targetIndex + 2] * targetAlpha * (1 - sourceAlpha)) / outAlpha);
+  image.pixels[targetIndex + 3] = clampByte(outAlpha * 255);
+}
+
+function drawCircle(image, centerX, centerY, radius, color) {
+  const minX = Math.floor(centerX - radius - 1);
+  const maxX = Math.ceil(centerX + radius + 1);
+  const minY = Math.floor(centerY - radius - 1);
+  const maxY = Math.ceil(centerY + radius + 1);
+
+  for (let y = minY; y <= maxY; y += 1) {
+    for (let x = minX; x <= maxX; x += 1) {
+      const distance = Math.hypot(x + 0.5 - centerX, y + 0.5 - centerY);
+      blendPixel(image, x, y, color, radius + 0.5 - distance);
+    }
+  }
+}
+
+function drawLine(image, startX, startY, endX, endY, width, color) {
+  const halfWidth = width / 2;
+  const minX = Math.floor(Math.min(startX, endX) - halfWidth - 1);
+  const maxX = Math.ceil(Math.max(startX, endX) + halfWidth + 1);
+  const minY = Math.floor(Math.min(startY, endY) - halfWidth - 1);
+  const maxY = Math.ceil(Math.max(startY, endY) + halfWidth + 1);
+  const lineX = endX - startX;
+  const lineY = endY - startY;
+  const lengthSquared = lineX * lineX + lineY * lineY;
+
+  for (let y = minY; y <= maxY; y += 1) {
+    for (let x = minX; x <= maxX; x += 1) {
+      const pixelX = x + 0.5;
+      const pixelY = y + 0.5;
+      const t = Math.max(0, Math.min(1, ((pixelX - startX) * lineX + (pixelY - startY) * lineY) / lengthSquared));
+      const closestX = startX + lineX * t;
+      const closestY = startY + lineY * t;
+      const distance = Math.hypot(pixelX - closestX, pixelY - closestY);
+      blendPixel(image, x, y, color, halfWidth + 0.5 - distance);
+    }
+  }
+}
+
+function createSmallWindowsIcon(size) {
+  const image = { width: size, height: size, pixels: Buffer.alloc(size * size * 4) };
+  const center = size / 2;
+  const outerRadius = size * 0.47;
+  const ringWidth = Math.max(2, size * 0.16);
+  const innerRadius = outerRadius - ringWidth;
+  const navy = [17, 73, 91, 255];
+  const teal = [38, 143, 163, 255];
+  const pale = [246, 251, 252, 255];
+  const hand = [27, 48, 55, 255];
+
+  drawCircle(image, center, center, outerRadius, navy);
+  drawCircle(image, center, center, outerRadius - Math.max(1, ringWidth * 0.45), teal);
+  drawCircle(image, center, center, innerRadius, pale);
+
+  if (size >= 32) {
+    const tickRadius = innerRadius * 0.76;
+    const tickWidth = Math.max(1, size * 0.05);
+    drawLine(image, center, center - tickRadius, center, center - tickRadius - size * 0.08, tickWidth, navy);
+    drawLine(image, center + tickRadius, center, center + tickRadius + size * 0.08, center, tickWidth, navy);
+    drawLine(image, center, center + tickRadius, center, center + tickRadius + size * 0.08, tickWidth, navy);
+    drawLine(image, center - tickRadius, center, center - tickRadius - size * 0.08, center, tickWidth, navy);
+  }
+
+  drawLine(image, center, center, center - size * 0.17, center - size * 0.18, Math.max(2, size * 0.08), hand);
+  drawLine(image, center, center, center + size * 0.2, center - size * 0.28, Math.max(2, size * 0.08), hand);
+  drawCircle(image, center, center, Math.max(1.2, size * 0.06), hand);
+
+  drawLine(image, center - size * 0.3, center + size * 0.12, center - size * 0.12, center + size * 0.31, Math.max(2, size * 0.09), teal);
+  drawLine(image, center - size * 0.12, center + size * 0.31, center + size * 0.32, center - size * 0.17, Math.max(2, size * 0.09), teal);
+
+  return image;
+}
+
+function makeIcoFrame(source, size) {
+  return size <= 48 ? createSmallWindowsIcon(size) : resizeArea(source, size);
+}
+
 function writePng(image) {
   const rows = [];
   const stride = image.width * 4;
@@ -218,7 +309,7 @@ function writeIco(filePath, images) {
 }
 
 const source = readPng(input);
-const images = sizes.map((size) => ({ size, data: writePng(resizeArea(source, size)) }));
+const images = sizes.map((size) => ({ size, data: writePng(makeIcoFrame(source, size)) }));
 writeIco(output, images);
 writeIco(tauriOutput, images);
 fs.writeFileSync(rgbaOutput, writePng(source));
