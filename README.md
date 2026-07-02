@@ -1,77 +1,157 @@
 # Workday Time Tracker
 
-A small Windows-first desktop time tracker with a large-button UI, local SQLite storage, on-demand XLSX export, and system tray behavior.
+Workday Time Tracker is a small Windows-first desktop app for tracking the shape of a workday: when work starts, when pauses happen, why those pauses happened, and how the day adds up.
 
-## Current Features
+It is built for simple, repeated use: large buttons, local storage, quick pause reasons, daily/weekly/monthly stats, and an XLSX export when you want a spreadsheet copy.
 
-- Start work, pause, resume, and end the day from the main screen.
-- Large click targets, no hotkeys.
-- Live work time, paused time, and current clock display.
-- Fixed pause presets with a settings menu for adding custom categories.
-- SQLite database stored in Electron's user data folder.
-- XLSX export only when requested.
-- Closing the window hides it to the tray instead of quitting.
+## Features
 
-## Recommended Build
+- Start work, pause, resume, and end the day from one screen.
+- Track pause reasons such as Bathroom, Family, Break, Admin, Meal, and custom categories.
+- Add optional notes to pause or stop events.
+- View live work time, pause time, and the current clock.
+- Review daily, weekly, and monthly summaries.
+- Export an XLSX workbook with raw segments, summary totals, and category summaries.
+- Store data locally in SQLite.
+- Use either the newer Tauri desktop build or the older Electron build.
 
-Version `0.2.0` adds a Tauri build. This is the recommended app path because it starts faster and bundles much smaller than Electron.
+## Requirements
 
-Built artifacts:
+All development paths need:
+
+- Node.js LTS
+- npm
+
+The recommended Tauri path also needs:
+
+- Rustup/Cargo
+- Visual Studio Build Tools with the C++ workload on Windows
+- WebView2 Runtime, which is included on current Windows installs
+
+The Electron fallback path also needs:
+
+- Native build tools for `better-sqlite3`
+- Windows Node/npm when building directly on Windows
+
+## Getting Started
+
+Clone the repo and install dependencies:
+
+```bash
+git clone https://github.com/itsauctions/TimeTracking.git
+cd TimeTracking
+npm install
+```
+
+From there, choose one of the two paths below.
+
+## Path 1: Tauri
+
+Tauri is the recommended path for normal desktop use. It produces a smaller Windows app and starts faster than the Electron version.
+
+Run the app in development:
+
+```bash
+npm run tauri:dev
+```
+
+Build the Windows app:
+
+```bash
+npm run tauri:build
+```
+
+Expected Windows build outputs:
 
 ```text
 dist/tauri/Workday Time Tracker_0.2.0_x64-setup.exe
 dist/tauri/workday-time-tracker-0.2.0.exe
 ```
 
-Use the setup exe for normal installation. The raw exe is useful for quick local testing.
+Use the setup `.exe` for normal installation. The raw `.exe` is useful for quick local testing.
 
-## Run
+## Path 2: Electron
+
+Electron is kept as a fallback path and for older packaging workflows. It uses the same UI and local SQLite data model.
+
+Run the app in development:
 
 ```bash
-npm install
 npm start
 ```
 
-## Build With Tauri
-
-Windows prerequisites:
-
-- Node.js LTS
-- Rustup/Cargo
-- Visual Studio Build Tools with the C++ workload
-
-Build:
-
-```bash
-npm run tauri:build
-```
-
-Because `better-sqlite3` is a native module, keep the `postinstall` rebuild step in `package.json`. It rebuilds SQLite for Electron's runtime.
-
-## Package Electron For Windows
+Build a portable Windows executable:
 
 ```bash
 npm run package:win
 ```
 
-The package script creates the older Electron portable Windows build through Electron Builder. Use this only as a fallback.
+If you are packaging from WSL and need to skip Windows executable signing/editing, use:
+
+```bash
+npm run package:win:wsl
+```
+
+Because `better-sqlite3` is a native module, keep the `postinstall` rebuild step in `package.json`. It rebuilds SQLite for Electron's runtime after install.
+
+## Using The App
+
+1. Click **Start Work** when the workday begins.
+2. Click **Pause** or a quick pause reason when stepping away.
+3. Click **Resume** when returning to work.
+4. Click **End Day** when finished.
+5. Open **Stats** to review totals.
+6. Click **Export XLSX** to create a spreadsheet copy of the tracked time.
+
+Custom pause categories can be added from the settings button in the app navigation.
 
 ## Local Data
 
-The app stores its database as:
+The app stores its SQLite database locally as:
 
 ```text
 workday-time.sqlite
 ```
 
-inside Electron's `userData` folder for the app.
+In Electron, this lives in Electron's `userData` folder. In Tauri, this lives in the app data directory resolved by Tauri.
 
-## Notes
+Exports are only created when requested. The XLSX export includes:
 
-This project was scaffolded from WSL. Static JavaScript checks pass, but Electron could not launch in the current WSL environment because `libnss3` is missing. Since SQLite is rebuilt for Electron, the SQLite smoke test should be run with Electron:
+- `Segments`: raw work and pause segments
+- `Summary`: day, week, and month totals
+- `Category Summary`: pause totals grouped by category
+
+## Useful Commands
+
+```bash
+npm install
+npm start
+npm run tauri:dev
+npm run tauri:build
+npm run package:win
+npm run package:win:wsl
+```
+
+Run the Electron SQLite smoke test:
 
 ```bash
 ELECTRON_RUN_AS_NODE=1 npx electron scripts/db-smoke.js
 ```
 
-That command is also blocked in this WSL image until the missing Electron runtime libraries are installed. Running as a Windows desktop app will need either Windows Node/npm installed or the missing WSL GUI libraries installed.
+## Troubleshooting
+
+If Electron fails to launch in WSL, install the missing GUI/runtime libraries or run the app from Windows Node/npm instead.
+
+If Tauri build commands fail, confirm that Rustup/Cargo and Visual Studio Build Tools are installed and available in the same shell where you run npm.
+
+If SQLite fails after dependency changes, rerun:
+
+```bash
+npm install
+```
+
+That triggers the Electron rebuild step for `better-sqlite3`.
+
+## License
+
+MIT. See [LICENSE](LICENSE).
