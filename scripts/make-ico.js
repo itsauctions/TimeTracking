@@ -4,8 +4,9 @@ const zlib = require("node:zlib");
 
 const input = path.join(__dirname, "..", "assets", "app-icon.png");
 const output = path.join(__dirname, "..", "assets", "app-icon.ico");
+const tauriOutput = path.join(__dirname, "..", "src-tauri", "icons", "icon.ico");
 const rgbaOutput = path.join(__dirname, "..", "assets", "app-icon-rgba.png");
-const sizes = [256, 128, 64, 32, 16];
+const sizes = [256, 128, 64, 48, 40, 32, 24, 20, 16];
 
 function readPng(filePath) {
   const buffer = fs.readFileSync(filePath);
@@ -93,20 +94,60 @@ function paeth(left, up, upLeft) {
   return upLeft;
 }
 
-function resizeNearest(image, size) {
+function clampByte(value) {
+  return Math.max(0, Math.min(255, Math.round(value)));
+}
+
+function resizeArea(image, size) {
   const pixels = Buffer.alloc(size * size * 4);
+  const scaleX = image.width / size;
+  const scaleY = image.height / size;
+
   for (let y = 0; y < size; y += 1) {
-    const sourceY = Math.min(image.height - 1, Math.floor((y / size) * image.height));
+    const sourceY0 = y * scaleY;
+    const sourceY1 = sourceY0 + scaleY;
+    const yStart = Math.floor(sourceY0);
+    const yEnd = Math.min(image.height - 1, Math.ceil(sourceY1) - 1);
+
     for (let x = 0; x < size; x += 1) {
-      const sourceX = Math.min(image.width - 1, Math.floor((x / size) * image.width));
-      const sourceIndex = (sourceY * image.width + sourceX) * 4;
+      const sourceX0 = x * scaleX;
+      const sourceX1 = sourceX0 + scaleX;
+      const xStart = Math.floor(sourceX0);
+      const xEnd = Math.min(image.width - 1, Math.ceil(sourceX1) - 1);
+      let red = 0;
+      let green = 0;
+      let blue = 0;
+      let alpha = 0;
+      let weightTotal = 0;
+
+      for (let sourceY = yStart; sourceY <= yEnd; sourceY += 1) {
+        const yWeight = Math.min(sourceY + 1, sourceY1) - Math.max(sourceY, sourceY0);
+
+        for (let sourceX = xStart; sourceX <= xEnd; sourceX += 1) {
+          const xWeight = Math.min(sourceX + 1, sourceX1) - Math.max(sourceX, sourceX0);
+          const weight = xWeight * yWeight;
+          const sourceIndex = (sourceY * image.width + sourceX) * 4;
+          const sourceAlpha = image.pixels[sourceIndex + 3] / 255;
+          const alphaWeight = weight * sourceAlpha;
+
+          red += image.pixels[sourceIndex] * alphaWeight;
+          green += image.pixels[sourceIndex + 1] * alphaWeight;
+          blue += image.pixels[sourceIndex + 2] * alphaWeight;
+          alpha += image.pixels[sourceIndex + 3] * weight;
+          weightTotal += weight;
+        }
+      }
+
       const targetIndex = (y * size + x) * 4;
-      pixels[targetIndex] = image.pixels[sourceIndex];
-      pixels[targetIndex + 1] = image.pixels[sourceIndex + 1];
-      pixels[targetIndex + 2] = image.pixels[sourceIndex + 2];
-      pixels[targetIndex + 3] = image.pixels[sourceIndex + 3];
+      const normalizedAlpha = alpha / weightTotal;
+      const colorDivisor = normalizedAlpha / 255;
+      pixels[targetIndex] = colorDivisor > 0 ? clampByte(red / weightTotal / colorDivisor) : 0;
+      pixels[targetIndex + 1] = colorDivisor > 0 ? clampByte(green / weightTotal / colorDivisor) : 0;
+      pixels[targetIndex + 2] = colorDivisor > 0 ? clampByte(blue / weightTotal / colorDivisor) : 0;
+      pixels[targetIndex + 3] = clampByte(normalizedAlpha);
     }
   }
+
   return { width: size, height: size, pixels };
 }
 
@@ -152,7 +193,7 @@ function crc32(buffer) {
   return (crc ^ 0xffffffff) >>> 0;
 }
 
-function writeIco(images) {
+function writeIco(filePath, images) {
   const header = Buffer.alloc(6);
   header.writeUInt16LE(0, 0);
   header.writeUInt16LE(1, 2);
@@ -173,12 +214,14 @@ function writeIco(images) {
     imageOffset += image.data.length;
   });
 
-  fs.writeFileSync(output, Buffer.concat([header, directory, ...images.map((image) => image.data)]));
+  fs.writeFileSync(filePath, Buffer.concat([header, directory, ...images.map((image) => image.data)]));
 }
 
 const source = readPng(input);
-const images = sizes.map((size) => ({ size, data: writePng(resizeNearest(source, size)) }));
-writeIco(images);
+const images = sizes.map((size) => ({ size, data: writePng(resizeArea(source, size)) }));
+writeIco(output, images);
+writeIco(tauriOutput, images);
 fs.writeFileSync(rgbaOutput, writePng(source));
 console.log(`Wrote ${output}`);
+console.log(`Wrote ${tauriOutput}`);
 console.log(`Wrote ${rgbaOutput}`);
