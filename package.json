@@ -8,6 +8,8 @@
     "dev": "electron .",
     "postinstall": "electron-rebuild",
     "make:icon": "node scripts/make-ico.js",
+    "make:icon:mac": "node scripts/make-mac-icon.js",
+    "make:icons": "npm run make:icon && npm run make:icon:mac",
     "tauri:dev": "tauri dev",
     "tauri:build": "tauri build",
     "package:mac": "electron-builder --mac dmg zip --universal",

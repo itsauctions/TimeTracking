@@ -449,17 +449,74 @@ dialog::backdrop {
   margin-top: 2px;
 }
 
+.timeline-axis {
+  align-items: end;
+  gap: 12px;
+  margin-bottom: -2px;
+}
+
+.timeline-axis-track {
+  position: relative;
+  min-height: 28px;
+  margin: 0 1px;
+  border-bottom: 1px solid var(--line);
+}
+
+.timeline-axis-tick {
+  position: absolute;
+  bottom: 0;
+  display: grid;
+  justify-items: center;
+  gap: 4px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 1;
+  transform: translateX(-50%);
+  white-space: nowrap;
+}
+
+.timeline-axis-tick::after {
+  content: "";
+  display: block;
+  width: 1px;
+  height: 7px;
+  background: var(--line);
+}
+
+.timeline-axis-tick.is-start {
+  justify-items: start;
+  transform: none;
+}
+
+.timeline-axis-tick.is-end {
+  justify-items: end;
+  transform: translateX(-100%);
+}
+
 .timeline-track {
   position: relative;
   min-height: 34px;
   overflow: hidden;
   border: 1px solid var(--line);
   border-radius: 8px;
-  background:
-    linear-gradient(to right, transparent calc(25% - 1px), var(--line) 25%, transparent calc(25% + 1px)),
-    linear-gradient(to right, transparent calc(50% - 1px), var(--line) 50%, transparent calc(50% + 1px)),
-    linear-gradient(to right, transparent calc(75% - 1px), var(--line) 75%, transparent calc(75% + 1px)),
-    var(--paper);
+  background: var(--paper);
+}
+
+.timeline-grid {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.timeline-grid-line {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: var(--line);
+  opacity: 0.85;
+  transform: translateX(-50%);
 }
 
 .timeline-segment {
@@ -640,6 +697,10 @@ dialog::backdrop {
   .stats-range-controls,
   .timeline-row {
     grid-template-columns: 1fr;
+  }
+
+  .timeline-axis-spacer {
+    display: none;
   }
 
   .pause-form {

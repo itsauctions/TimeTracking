@@ -134,6 +134,40 @@ function timeInputFromMinutes(minutes) {
   return `${String(Math.floor(clamped / 60)).padStart(2, "0")}:${String(clamped % 60).padStart(2, "0")}`;
 }
 
+function formatHourTick(minute) {
+  const clamped = Math.max(0, Math.min(1440, Number(minute) || 0));
+  const hour = Math.floor((clamped % 1440) / 60);
+  const suffix = hour >= 12 ? "PM" : "AM";
+  const displayHour = hour % 12 || 12;
+  return `${displayHour} ${suffix}`;
+}
+
+function timelineHourTicks(range) {
+  const startMinute = range.startMinute;
+  const endMinute = range.endMinute;
+  const totalWindow = Math.max(1, endMinute - startMinute);
+  const step = totalWindow <= 6 * 60
+    ? 60
+    : totalWindow <= 12 * 60
+      ? 120
+      : totalWindow <= 18 * 60
+        ? 180
+        : 240;
+  const ticks = [startMinute];
+  let next = Math.ceil(startMinute / step) * step;
+  if (next === startMinute) next += step;
+  while (next < endMinute) {
+    ticks.push(next);
+    next += step;
+  }
+  ticks.push(endMinute);
+  return [...new Set(ticks)].map((minute) => ({
+    minute,
+    label: formatHourTick(minute),
+    percent: ((minute - startMinute) / totalWindow) * 100
+  }));
+}
+
 function defaultStatsRange() {
   const end = new Date();
   const start = new Date();
@@ -443,8 +477,26 @@ function renderDayTimeline() {
 
   statsTimezoneLabel.textContent = `Timezone: ${chart.timeZone}`;
   syncStatsRangeControls(chart.range);
-  dayTimelineChart.innerHTML = chart.days.map((day) => {
-    const totalWindow = Math.max(1, chart.range.endMinute - chart.range.startMinute);
+  const totalWindow = Math.max(1, chart.range.endMinute - chart.range.startMinute);
+  const ticks = timelineHourTicks(chart.range);
+  const gridLines = ticks
+    .filter((tick) => tick.percent > 0 && tick.percent < 100)
+    .map((tick) => `<span class="timeline-grid-line" style="left: ${tick.percent}%"></span>`)
+    .join("");
+  const axis = `
+    <div class="timeline-axis timeline-row" aria-hidden="true">
+      <div class="timeline-axis-spacer"></div>
+      <div class="timeline-axis-track">
+        ${ticks.map((tick, index) => `
+          <span class="timeline-axis-tick ${index === 0 ? "is-start" : ""} ${index === ticks.length - 1 ? "is-end" : ""}"
+            style="left: ${tick.percent}%">
+            <span>${escapeHtml(tick.label)}</span>
+          </span>
+        `).join("")}
+      </div>
+    </div>
+  `;
+  dayTimelineChart.innerHTML = axis + chart.days.map((day) => {
     const segments = day.segments.map((segment) => {
       const left = ((segment.startMinute - chart.range.startMinute) / totalWindow) * 100;
       const width = Math.max(0.8, ((segment.endMinute - segment.startMinute) / totalWindow) * 100);
@@ -464,6 +516,7 @@ function renderDayTimeline() {
           <span>${formatShortDuration(day.workMs)} work · ${formatShortDuration(day.pauseMs)} paused</span>
         </div>
         <div class="timeline-track" role="img" aria-label="${escapeHtml(formatDateLabel(day.key))} timeline">
+          <div class="timeline-grid" aria-hidden="true">${gridLines}</div>
           ${segments || `<span class="timeline-empty">No tracked time</span>`}
         </div>
       </article>
