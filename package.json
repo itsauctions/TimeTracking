@@ -10,6 +10,7 @@
     "make:icon": "node scripts/make-ico.js",
     "tauri:dev": "tauri dev",
     "tauri:build": "tauri build",
+    "package:mac": "electron-builder --mac dmg zip --universal",
     "package:win": "electron-builder --win portable",
     "package:win:wsl": "electron-builder --win portable -c.win.signAndEditExecutable=false"
   },
@@ -22,14 +23,12 @@
   "license": "MIT",
   "devDependencies": {
     "@electron/rebuild": "^3.7.0",
+    "@tauri-apps/cli": "^2.6.2",
     "electron": "^31.7.7",
     "electron-builder": "^24.13.3"
   },
-  "optionalDependencies": {
-    "@tauri-apps/cli": "^2.6.2"
-  },
   "dependencies": {
-    "better-sqlite3": "^11.1.2"
+    "better-sqlite3": "^12.11.1"
   },
   "build": {
     "appId": "local.workday-time-tracker",
@@ -40,9 +39,20 @@
       "assets/**/*",
       "package.json"
     ],
+    "asarUnpack": [
+      "node_modules/**/*.node"
+    ],
     "win": {
       "icon": "assets/app-icon.ico",
       "target": "portable"
+    },
+    "mac": {
+      "icon": "assets/app-icon.icns",
+      "category": "public.app-category.productivity",
+      "target": [
+        "dmg",
+        "zip"
+      ]
     }
   }
 }

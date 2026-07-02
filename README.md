@@ -1,6 +1,6 @@
 # Workday Time Tracker
 
-Workday Time Tracker is a small Windows-first desktop app for tracking the shape of a workday: when work starts, when pauses happen, why those pauses happened, and how the day adds up.
+Workday Time Tracker is a small desktop app for tracking the shape of a workday: when work starts, when pauses happen, why those pauses happened, and how the day adds up.
 
 It is built for simple, repeated use: large buttons, local storage, quick pause reasons, daily/weekly/monthly stats, and an XLSX export when you want a spreadsheet copy.
 
@@ -13,7 +13,8 @@ It is built for simple, repeated use: large buttons, local storage, quick pause 
 - Review daily, weekly, and monthly summaries.
 - Export an XLSX workbook with raw segments, summary totals, and category summaries.
 - Store data locally in SQLite.
-- Use either the newer Tauri desktop build or the older Electron build.
+- Use the Electron desktop build on macOS or Windows, including a macOS menu bar status item.
+- Use the newer Tauri desktop build as an alternate Windows packaging path.
 
 ## Requirements
 
@@ -32,6 +33,7 @@ The Electron fallback path also needs:
 
 - Native build tools for `better-sqlite3`
 - Windows Node/npm when building directly on Windows
+- Xcode Command Line Tools when building the macOS app on macOS
 
 ## Getting Started
 
@@ -72,7 +74,7 @@ Use the setup `.exe` for normal installation. The raw `.exe` is useful for quick
 
 ## Path 2: Electron
 
-Electron is kept as a fallback path and for older packaging workflows. It uses the same UI and local SQLite data model.
+Electron is the preferred path when you want the macOS app or the older Windows packaging workflow. It uses the same UI and local SQLite data model.
 
 Run the app in development:
 
@@ -85,6 +87,14 @@ Build a portable Windows executable:
 ```bash
 npm run package:win
 ```
+
+Build the universal macOS app, DMG, and ZIP for both Intel and Apple Silicon Macs:
+
+```bash
+npm run package:mac
+```
+
+On macOS, the Electron app also appears in the upper menu bar with quick timer controls.
 
 If you are packaging from WSL and need to skip Windows executable signing/editing, use:
 
@@ -126,6 +136,7 @@ Exports are only created when requested. The XLSX export includes:
 ```bash
 npm install
 npm start
+npm run package:mac
 npm run tauri:dev
 npm run tauri:build
 npm run package:win

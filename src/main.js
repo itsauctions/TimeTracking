@@ -271,6 +271,14 @@ function statusText(state = currentState()) {
   return `${label} for ${formatElapsed(Date.now() - new Date(state.activeSince).getTime())}`;
 }
 
+function trayTitle(state = currentState()) {
+  if (process.platform !== "darwin") return "";
+  if (state.status === "working") return "Work";
+  if (state.status === "paused") return "Paused";
+  if (state.status === "stopped") return "Done";
+  return "Timer";
+}
+
 function minutes(ms) {
   return Math.round((ms / 60000) * 100) / 100;
 }
@@ -543,10 +551,17 @@ function createWindow() {
 }
 
 function createTray() {
-  const icon = nativeImage.createFromPath(assetPath("app-icon.png")).resize({ width: 16, height: 16 });
+  const traySize = process.platform === "darwin" ? 18 : 16;
+  const icon = nativeImage.createFromPath(assetPath("app-icon-rgba.png")).resize({ width: traySize, height: traySize });
+  if (process.platform === "darwin") {
+    icon.setTemplateImage(true);
+  }
   tray = new Tray(icon);
   tray.setToolTip("Workday Time Tracker");
-  tray.on("click", showMainWindow);
+  tray.on("click", () => {
+    if (process.platform === "darwin") return;
+    showMainWindow();
+  });
   updateTray();
 }
 
@@ -561,12 +576,35 @@ function updateTray() {
   const state = currentState();
   const text = statusText(state);
   tray.setToolTip(`Workday Time Tracker\n${text}`);
+  if (process.platform === "darwin") {
+    tray.setTitle(trayTitle(state));
+  }
   if (mainWindow) {
     mainWindow.setTitle(`${text} - Workday Time Tracker`);
   }
-  tray.setContextMenu(Menu.buildFromTemplate([
+  tray.setContextMenu(Menu.buildFromTemplate(trayMenuTemplate(state, text)));
+  updateAppMenu();
+}
+
+function trayMenuTemplate(state, text) {
+  return [
     { label: text, enabled: false },
     { label: "Show", click: showMainWindow },
+    { type: "separator" },
+    { label: "Start Work", enabled: state.status === "idle" || state.status === "stopped", click: () => addEvent("start") },
+    { label: "Resume", enabled: state.status === "paused", click: () => addEvent("resume") },
+    {
+      label: "Pause For",
+      enabled: state.status === "working",
+      submenu: categories().map((category) => ({
+        label: category.name,
+        click: () => addEvent("pause", category.name)
+      }))
+    },
+    { label: "End Day", enabled: state.status !== "idle" && state.status !== "stopped", click: () => addEvent("stop") },
+    { type: "separator" },
+    { label: "Stats", click: () => sendNavigation("stats") },
+    { label: "Export XLSX", click: exportWorkbookWithDialog },
     { type: "separator" },
     {
       label: "Quit",
@@ -575,8 +613,7 @@ function updateTray() {
         app.quit();
       }
     }
-  ]));
-  updateAppMenu();
+  ];
 }
 
 function updateAppMenu() {
@@ -589,6 +626,20 @@ function updateAppMenu() {
   }));
 
   const template = [
+    ...(process.platform === "darwin" ? [{
+      label: app.name,
+      submenu: [
+        { role: "about" },
+        { type: "separator" },
+        { role: "services" },
+        { type: "separator" },
+        { role: "hide" },
+        { role: "hideOthers" },
+        { role: "unhide" },
+        { type: "separator" },
+        { role: "quit" }
+      ]
+    }] : []),
     {
       label: statusText(state),
       submenu: [
@@ -601,7 +652,7 @@ function updateAppMenu() {
       submenu: [
         { label: "Export XLSX", click: exportWorkbookWithDialog },
         { type: "separator" },
-        {
+        process.platform === "darwin" ? { role: "close" } : {
           label: "Quit",
           click: () => {
             app.isQuiting = true;
