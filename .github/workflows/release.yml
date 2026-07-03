@@ -45,15 +45,15 @@ jobs:
 
       - name: Generate checksums
         shell: bash
-        run: >
-          node -e "const fs = require('fs'); const crypto = require('crypto');
-          const files = fs.readdirSync('dist').filter((file) => /\.(dmg|exe)$/.test(file));
-          if (!files.length) throw new Error('No release artifacts found');
+        run: |
+          node -e 'const fs = require("fs"); const crypto = require("crypto");
+          const files = fs.readdirSync("dist").filter((file) => /\.(dmg|exe)$/.test(file));
+          if (!files.length) throw new Error("No release artifacts found");
           const lines = files.map((file) => {
-          const hash = crypto.createHash('sha256').update(fs.readFileSync(`dist/${file}`)).digest('hex');
-          return `${hash}  ${file}`;
+            const hash = crypto.createHash("sha256").update(fs.readFileSync("dist/" + file)).digest("hex");
+            return hash + "  " + file;
           });
-          fs.writeFileSync(`dist/SHA256SUMS-${process.env.RUNNER_OS}.txt`, `${lines.join('\n')}\n`);"
+          fs.writeFileSync("dist/SHA256SUMS-" + process.env.RUNNER_OS + ".txt", lines.join("\n") + "\n");'
 
       - name: Upload release assets
         uses: softprops/action-gh-release@v2
