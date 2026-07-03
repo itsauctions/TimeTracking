@@ -14,7 +14,7 @@
     "make:icons": "npm run make:icon && npm run make:icon:mac",
     "tauri:dev": "tauri dev",
     "tauri:build": "tauri build",
-    "package:mac": "electron-builder --mac dmg zip --universal",
+    "package:mac": "electron-builder --mac dmg --universal",
     "package:win": "electron-builder --win portable",
     "package:win:wsl": "electron-builder --win portable -c.win.signAndEditExecutable=false"
   },
@@ -38,6 +38,7 @@
   "build": {
     "appId": "local.workday-time-tracker",
     "productName": "Workday Time Tracker",
+    "artifactName": "Workday-Time-Tracker-${version}-${os}-${arch}.${ext}",
     "icon": "assets/app-icon.png",
     "files": [
       "src/**/*",
@@ -58,8 +59,7 @@
         "NSCameraUsageDescription": "Workday Time Tracker can use the camera locally to pause tracking when you step away."
       },
       "target": [
-        "dmg",
-        "zip"
+        "dmg"
       ]
     }
   },

@@ -724,6 +724,17 @@ function formatElapsed(ms) {
   return "less than 1m";
 }
 
+function compactElapsed(ms) {
+  const elapsed = formatElapsed(ms);
+  return elapsed === "less than 1m" ? "<1m" : elapsed;
+}
+
+function compactProjectName(name) {
+  const value = String(name || "").trim();
+  if (value.length <= 18) return value;
+  return `${value.slice(0, 17)}...`;
+}
+
 function statusText(state = currentState()) {
   const label = statusLabel(state.status);
   if (!state.activeSince) return label;
@@ -733,9 +744,12 @@ function statusText(state = currentState()) {
 
 function trayTitle(state = currentState()) {
   if (process.platform !== "darwin") return "";
-  if (state.status === "working") return state.activeProject?.name?.slice(0, 16) || "Work";
-  if (state.status === "paused") return "Paused";
-  if (state.status === "stopped") return "Done";
+  const elapsed = state.activeSince ? ` ${compactElapsed(Date.now() - new Date(state.activeSince).getTime())}` : "";
+  const projectName = compactProjectName(state.activeProject?.name);
+  const project = projectName ? ` - ${projectName}` : "";
+  if (state.status === "working") return `Work${elapsed}${project}`;
+  if (state.status === "paused") return `Paused${elapsed}${project}`;
+  if (state.status === "stopped") return `Done${project}`;
   return "Timer";
 }
 

@@ -1,0 +1,68 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: macOS DMG
+            os: macos-latest
+            build_command: npm run package:mac
+            release_glob: dist/*.dmg
+          - name: Windows Portable
+            os: windows-latest
+            build_command: npm run package:win
+            release_glob: dist/*.exe
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build unsigned artifacts
+        run: ${{ matrix.build_command }}
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: false
+
+      - name: Generate checksums
+        shell: bash
+        run: |
+          cd dist
+          files=()
+          for pattern in *.dmg *.exe; do
+            for file in $pattern; do
+              [ -f "$file" ] && files+=("$file")
+            done
+          done
+          shasum -a 256 "${files[@]}" > "SHA256SUMS-${{ runner.os }}.txt"
+
+      - name: Upload release assets
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            ${{ matrix.release_glob }}
+            dist/SHA256SUMS-*.txt
+          body: |
+            Unsigned desktop build.
+
+            macOS: if Gatekeeper blocks the app, right-click the app and choose Open, or approve it in Privacy & Security.
+            Windows: SmartScreen may warn because the app is unsigned.

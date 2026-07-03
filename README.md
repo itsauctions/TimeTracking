@@ -89,7 +89,7 @@ Build a portable Windows executable:
 npm run package:win
 ```
 
-Build the universal macOS app, DMG, and ZIP for both Intel and Apple Silicon Macs:
+Build the universal macOS DMG for both Intel and Apple Silicon Macs:
 
 ```bash
 npm run package:mac
@@ -104,6 +104,19 @@ npm run package:win:wsl
 ```
 
 Because `better-sqlite3` is a native module, keep the `postinstall` rebuild step in `package.json`. It rebuilds SQLite for Electron's runtime after install.
+
+## Publishing Downloads
+
+Generated binaries are not tracked in git. Push a version tag to build and publish release assets through GitHub Actions:
+
+```bash
+npm version patch
+git push origin master --tags
+```
+
+The `Release` workflow builds the macOS DMG on `macos-latest` and the Windows portable executable on `windows-latest`, then attaches both to the GitHub Release with SHA-256 checksum files.
+
+These builds are unsigned. On macOS, users may need to right-click the app and choose **Open**, or approve it in Privacy & Security. On Windows, SmartScreen may warn because the executable is unsigned.
 
 ## Using The App
 
