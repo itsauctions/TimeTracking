@@ -15,7 +15,8 @@ const AUTO_AWAY_DEFAULTS = {
   enabled: false,
   seconds: 10,
   presentSeconds: 10,
-  sensitivity: "normal"
+  sensitivity: "normal",
+  cameraMovementEnabled: false
 };
 
 app.setAppUserModelId(APP_ID);
@@ -52,6 +53,41 @@ function openDatabase() {
       key TEXT PRIMARY KEY,
       value TEXT NOT NULL
     );
+
+    CREATE TABLE IF NOT EXISTS movement_minute_metrics (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      session_start TEXT NOT NULL,
+      minute_start TEXT NOT NULL,
+      face_detected_seconds INTEGER DEFAULT 0,
+      movement_avg REAL,
+      movement_p95 REAL,
+      rotation_avg REAL,
+      gaze_shift_avg REAL,
+      avg_yaw REAL,
+      avg_pitch REAL,
+      avg_roll REAL,
+      pitch_drift REAL,
+      yaw_drift REAL,
+      roll_drift REAL,
+      forward_lean_score REAL,
+      stillness_seconds INTEGER DEFAULT 0,
+      fidget_score REAL,
+      posture_risk_score REAL,
+      blink_count INTEGER DEFAULT 0,
+      talking_seconds INTEGER DEFAULT 0,
+      expression_activity REAL,
+      created_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS movement_events (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      session_start TEXT NOT NULL,
+      start_time TEXT NOT NULL,
+      end_time TEXT,
+      event_type TEXT NOT NULL,
+      severity TEXT,
+      message TEXT
+    );
   `);
 
   const insertCategory = db.prepare(`
@@ -70,6 +106,7 @@ function openDatabase() {
   setDefaultSetting("autoAwaySeconds", String(AUTO_AWAY_DEFAULTS.seconds));
   setDefaultSetting("autoAwayPresentSeconds", String(AUTO_AWAY_DEFAULTS.presentSeconds));
   setDefaultSetting("autoAwaySensitivity", AUTO_AWAY_DEFAULTS.sensitivity);
+  setDefaultSetting("cameraMovementEnabled", AUTO_AWAY_DEFAULTS.cameraMovementEnabled ? "1" : "0");
 }
 
 function getSetting(key, fallback) {
@@ -89,7 +126,8 @@ function settings() {
     autoAwayEnabled: getSetting("autoAwayEnabled", "0") === "1",
     autoAwaySeconds: validateAutoAwaySeconds(getSetting("autoAwaySeconds", String(AUTO_AWAY_DEFAULTS.seconds))),
     autoAwayPresentSeconds: validateAutoAwayPresentSeconds(getSetting("autoAwayPresentSeconds", String(AUTO_AWAY_DEFAULTS.presentSeconds))),
-    autoAwaySensitivity: validateAutoAwaySensitivity(getSetting("autoAwaySensitivity", AUTO_AWAY_DEFAULTS.sensitivity))
+    autoAwaySensitivity: validateAutoAwaySensitivity(getSetting("autoAwaySensitivity", AUTO_AWAY_DEFAULTS.sensitivity)),
+    cameraMovementEnabled: getSetting("cameraMovementEnabled", "0") === "1"
   };
 }
 
@@ -1024,10 +1062,65 @@ ipcMain.handle("settings:update", (_event, payload) => {
   setSetting("autoAwaySeconds", String(validateAutoAwaySeconds(payload?.autoAwaySeconds)));
   setSetting("autoAwayPresentSeconds", String(validateAutoAwayPresentSeconds(payload?.autoAwayPresentSeconds)));
   setSetting("autoAwaySensitivity", validateAutoAwaySensitivity(payload?.autoAwaySensitivity));
+  setSetting("cameraMovementEnabled", payload?.cameraMovementEnabled ? "1" : "0");
   updateTray();
   updateAppMenu();
   return currentState();
 });
+
+function storeMovementMinute(minuteData) {
+  db.prepare(`
+    INSERT INTO movement_minute_metrics (
+      session_start, minute_start, face_detected_seconds,
+      movement_avg, movement_p95, rotation_avg, gaze_shift_avg,
+      avg_yaw, avg_pitch, avg_roll,
+      pitch_drift, yaw_drift, roll_drift, forward_lean_score,
+      stillness_seconds, fidget_score, posture_risk_score,
+      blink_count, talking_seconds, expression_activity, created_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    minuteData.sessionStart, minuteData.minuteStart, minuteData.faceDetectedSeconds,
+    minuteData.movementAvg ?? null, minuteData.movementP95 ?? null,
+    minuteData.rotationAvg ?? null, minuteData.gazeShiftAvg ?? null,
+    minuteData.avgYaw ?? null, minuteData.avgPitch ?? null, minuteData.avgRoll ?? null,
+    minuteData.pitchDrift ?? null, minuteData.yawDrift ?? null,
+    minuteData.rollDrift ?? null, minuteData.forwardLeanScore ?? null,
+    minuteData.stillnessSeconds ?? 0, minuteData.fidgetScore ?? null,
+    minuteData.postureRiskScore ?? null,
+    minuteData.blinkCount ?? 0, minuteData.talkingSeconds ?? 0,
+    minuteData.expressionActivity ?? null, new Date().toISOString()
+  );
+}
+
+function getMovementToday() {
+  const timeZone = settings().timeZone;
+  const range = dayRangeForKey(todayKey(new Date(), timeZone), timeZone);
+  const rows = db.prepare(`
+    SELECT * FROM movement_minute_metrics
+    WHERE minute_start >= ? AND minute_start < ?
+    ORDER BY minute_start ASC
+  `).all(range.start, range.end);
+
+  const events = db.prepare(`
+    SELECT * FROM movement_events
+    WHERE start_time >= ? AND start_time < ?
+    ORDER BY start_time ASC
+  `).all(range.start, range.end);
+
+  const segments = calculateTotals(allEvents()).segments;
+
+  return {
+    minutes: rows,
+    events,
+    workSegments: segments.filter((s) => s.type === "work")
+  };
+}
+
+ipcMain.handle("movement:storeMinute", (_event, minuteData) => {
+  storeMovementMinute(minuteData);
+});
+
+ipcMain.handle("movement:getToday", () => getMovementToday());
 
 app.whenReady().then(async () => {
   session.defaultSession.setPermissionRequestHandler((_webContents, permission, callback) => {

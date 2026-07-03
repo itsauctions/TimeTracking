@@ -11,6 +11,7 @@
     <nav class="app-nav" aria-label="Main">
       <button class="tab-button active" id="timerTab" type="button">Timer</button>
       <button class="tab-button" id="statsTab" type="button">Stats</button>
+      <button class="tab-button hidden" id="movementTab" type="button">Movement</button>
       <button class="tab-button" id="historyTab" type="button">History</button>
       <button class="tab-button theme-button" id="themeButton" type="button">Theme</button>
       <button class="icon-button" id="settingsButton" title="Settings" aria-label="Settings">⚙</button>
@@ -23,17 +24,21 @@
             <p class="eyebrow">Workday</p>
             <h1 id="statusLabel">Ready</h1>
           </div>
-          <div class="vision-status hidden" id="visionStatus" aria-live="polite">
-            <span class="vision-dot" aria-hidden="true"></span>
-            <span>
-              <strong id="visionStatusLabel">Auto-away</strong>
-              <small id="visionStatusMetric">Off</small>
-            </span>
+          <div class="vision-block">
+            <div class="vision-status hidden" id="visionStatus" aria-live="polite">
+              <span class="vision-dot" aria-hidden="true"></span>
+              <span>
+                <strong id="visionStatusLabel">Auto-away</strong>
+                <small id="visionStatusMetric">Off</small>
+              </span>
+            </div>
+            <button class="camera-toggle hidden" id="cameraToggle" type="button" title="Toggle camera monitoring" aria-pressed="true">
+              <span class="camera-toggle-track">
+                <span class="camera-toggle-thumb"></span>
+              </span>
+              <span class="camera-toggle-label">Camera</span>
+            </button>
           </div>
-          <button class="camera-toggle hidden" id="cameraToggle" type="button" title="Pause or resume camera monitoring" aria-pressed="true">
-            <span class="camera-toggle-dot" aria-hidden="true"></span>
-            <span class="camera-toggle-label">Camera</span>
-          </button>
         </div>
 
         <div class="time-grid">
@@ -148,6 +153,17 @@
       </section>
     </main>
 
+    <main class="movement-page hidden" id="movementPage">
+      <section class="stats-section">
+        <div class="panel-head">
+          <h2>Movement</h2>
+        </div>
+        <div class="movement-cards" id="movementCards"></div>
+        <div class="movement-insights" id="movementInsights"></div>
+        <div class="movement-timeline" id="movementTimeline"></div>
+      </section>
+    </main>
+
     <dialog id="settingsDialog">
       <form method="dialog" class="settings-form">
         <div class="panel-head">
@@ -193,7 +209,11 @@
               </select>
             </label>
           </div>
-          <p class="setting-note">Hysteresis prevents flickering between states: "Away delay" is how long your face must be missing before pausing; "Return delay" is how long it must be seen again before resuming. Your computer will ask for camera permission the first time this starts. Frames are checked locally and are not saved.</p>
+          <label class="toggle-row" for="cameraMovementEnabled">
+            <input id="cameraMovementEnabled" type="checkbox">
+            <span>Track posture and movement during work</span>
+          </label>
+          <p class="setting-note">Hysteresis prevents flickering between states: "Away delay" is how long your face must be missing before pausing; "Return delay" is how long it must be seen again before resuming. Movement tracking stores anonymous minute-level metrics locally (no video is saved). Your computer will ask for camera permission the first time this starts.</p>
         </fieldset>
         <label for="categoryInput">New pause category</label>
         <div class="inline-form">

@@ -12,6 +12,8 @@ contextBridge.exposeInMainWorld("tracker", {
   deleteCategory: (id) => ipcRenderer.invoke("category:delete", id),
   updateSettings: (payload) => ipcRenderer.invoke("settings:update", payload),
   exportToday: () => ipcRenderer.invoke("csv:exportToday"),
+  storeMovementMinute: (data) => ipcRenderer.invoke("movement:storeMinute", data),
+  getMovementToday: () => ipcRenderer.invoke("movement:getToday"),
   onNavigate: (callback) => ipcRenderer.on("menu:navigate", (_event, page) => callback(page)),
   onCycleTheme: (callback) => ipcRenderer.on("menu:cycleTheme", callback)
 });
