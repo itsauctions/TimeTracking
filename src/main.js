@@ -49,6 +49,7 @@ function openDatabase() {
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       event_type TEXT NOT NULL CHECK(event_type IN ('start', 'pause', 'resume', 'stop', 'project_switch')),
       reason TEXT,
+      pause_category TEXT,
       note TEXT,
       project_id INTEGER REFERENCES projects(id),
       occurred_at TEXT NOT NULL
@@ -136,9 +137,10 @@ function openDatabase() {
 function migrateEventsForProjects() {
   const columns = db.prepare("PRAGMA table_info(events)").all();
   const hasProjectId = columns.some((column) => column.name === "project_id");
+  const hasPauseCategory = columns.some((column) => column.name === "pause_category");
   const schema = db.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'events'").get()?.sql || "";
   const allowsProjectSwitch = schema.includes("project_switch");
-  if (hasProjectId && allowsProjectSwitch) return;
+  if (hasProjectId && hasPauseCategory && allowsProjectSwitch) return;
 
   db.exec(`
     BEGIN;
@@ -146,12 +148,13 @@ function migrateEventsForProjects() {
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       event_type TEXT NOT NULL CHECK(event_type IN ('start', 'pause', 'resume', 'stop', 'project_switch')),
       reason TEXT,
+      pause_category TEXT,
       note TEXT,
       project_id INTEGER REFERENCES projects(id),
       occurred_at TEXT NOT NULL
     );
-    INSERT INTO events_new (id, event_type, reason, note, project_id, occurred_at)
-    SELECT id, event_type, reason, note, ${hasProjectId ? "project_id" : "NULL"}, occurred_at FROM events;
+    INSERT INTO events_new (id, event_type, reason, pause_category, note, project_id, occurred_at)
+    SELECT id, event_type, reason, ${hasPauseCategory ? "pause_category" : "NULL"}, note, ${hasProjectId ? "project_id" : "NULL"}, occurred_at FROM events;
     DROP TABLE events;
     ALTER TABLE events_new RENAME TO events;
     COMMIT;
@@ -273,6 +276,7 @@ function eventsBetween(start, end) {
       events.id,
       events.event_type AS type,
       events.reason,
+      events.pause_category AS pauseCategory,
       events.note,
       events.project_id AS projectId,
       projects.name AS projectName,
@@ -292,6 +296,7 @@ function allEvents() {
       events.id,
       events.event_type AS type,
       events.reason,
+      events.pause_category AS pauseCategory,
       events.note,
       events.project_id AS projectId,
       projects.name AS projectName,
@@ -412,6 +417,7 @@ function calculateTotals(events, now = new Date()) {
   let openType = null;
   let openAt = null;
   let openReason = "";
+  let openPauseCategory = "";
   let openNote = "";
   let openProject = null;
   let openEventId = null;
@@ -423,16 +429,17 @@ function calculateTotals(events, now = new Date()) {
       if (event.type === "project_switch" && openType === "work" && openAt) {
         const durationMs = occurredAt - openAt;
         workMs += durationMs;
-        segments.push(segmentRow("work", openAt, occurredAt, durationMs, "", "", openProject, openEventId));
+        segments.push(segmentRow("work", openAt, occurredAt, durationMs, "", "", "", openProject, openEventId));
       }
       if (openType === "pause" && openAt) {
         const durationMs = occurredAt - openAt;
         pauseMs += durationMs;
-        segments.push(segmentRow("pause", openAt, occurredAt, durationMs, openReason, openNote, null, openEventId));
+        segments.push(segmentRow("pause", openAt, occurredAt, durationMs, openReason, openPauseCategory, openNote, null, openEventId));
       }
       openType = "work";
       openAt = occurredAt;
       openReason = "";
+      openPauseCategory = "";
       openNote = "";
       openProject = projectFromEvent(event);
       openEventId = event.id;
@@ -442,11 +449,12 @@ function calculateTotals(events, now = new Date()) {
       if (openType === "work" && openAt) {
         const durationMs = occurredAt - openAt;
         workMs += durationMs;
-        segments.push(segmentRow("work", openAt, occurredAt, durationMs, "", "", openProject, openEventId));
+        segments.push(segmentRow("work", openAt, occurredAt, durationMs, "", "", "", openProject, openEventId));
       }
       openType = "pause";
       openAt = occurredAt;
       openReason = event.reason || "";
+      openPauseCategory = event.pauseCategory || "";
       openNote = event.note || "";
       openProject = null;
       openEventId = event.id;
@@ -457,11 +465,12 @@ function calculateTotals(events, now = new Date()) {
         const durationMs = occurredAt - openAt;
         if (openType === "work") workMs += durationMs;
         if (openType === "pause") pauseMs += durationMs;
-        segments.push(segmentRow(openType, openAt, occurredAt, durationMs, openReason, openNote, openType === "work" ? openProject : null, openEventId));
+        segments.push(segmentRow(openType, openAt, occurredAt, durationMs, openReason, openPauseCategory, openNote, openType === "work" ? openProject : null, openEventId));
       }
       openType = null;
       openAt = null;
       openReason = "";
+      openPauseCategory = "";
       openNote = "";
       openProject = null;
       openEventId = null;
@@ -472,7 +481,7 @@ function calculateTotals(events, now = new Date()) {
     const durationMs = now - openAt;
     if (openType === "work") workMs += durationMs;
     if (openType === "pause") pauseMs += durationMs;
-    segments.push(segmentRow(openType, openAt, now, durationMs, openReason, openNote, openType === "work" ? openProject : null, openEventId));
+    segments.push(segmentRow(openType, openAt, now, durationMs, openReason, openPauseCategory, openNote, openType === "work" ? openProject : null, openEventId));
   }
 
   return { workMs, pauseMs, segments };
@@ -643,7 +652,7 @@ function addSegmentStats(map, key, segment) {
   }
   if (segment.type === "pause") {
     bucket.pauseMs += durationMs;
-    const category = segment.reason || "Uncategorized";
+    const category = segment.pauseCategory || segment.reason || "Uncategorized";
     bucket.categories[category] = (bucket.categories[category] || 0) + durationMs;
   }
 }
@@ -658,13 +667,15 @@ function projectFromEvent(event) {
   };
 }
 
-function segmentRow(type, start, end, durationMs, reason, note, project, sourceEventId) {
+function segmentRow(type, start, end, durationMs, reason, pauseCategory, note, project, sourceEventId) {
   return {
     type,
     start: start.toISOString(),
     end: end.toISOString(),
     durationMinutes: Math.round((durationMs / 60000) * 100) / 100,
     reason: reason || "",
+    pauseCategory: type === "pause" ? pauseCategory || "" : "",
+    effectivePauseCategory: type === "pause" ? pauseCategory || reason || "" : "",
     note: note || "",
     sourceEventId: sourceEventId || null,
     projectId: type === "work" ? project?.id || null : null,
@@ -769,7 +780,8 @@ function exportWorkbook() {
       "segment_type",
       "project_id",
       "project",
-      "pause_reason",
+      "pause_source",
+      "pause_category",
       "note",
       "duration_minutes"
     ],
@@ -781,6 +793,7 @@ function exportWorkbook() {
       segment.projectId || "",
       segment.projectName || "",
       segment.reason,
+      segment.effectivePauseCategory,
       segment.note,
       segment.durationMinutes
     ])
@@ -1180,6 +1193,20 @@ function reassignSegmentProject(sourceEventId, projectId) {
   return currentState();
 }
 
+function updatePauseSegmentCategory(sourceEventId, category) {
+  const eventId = Number(sourceEventId);
+  if (!Number.isInteger(eventId)) return currentState();
+  const cleanCategory = String(category || "").trim();
+  db.prepare(`
+    UPDATE events
+    SET pause_category = ?
+    WHERE id = ? AND event_type = 'pause'
+  `).run(cleanCategory || null, eventId);
+  updateTray();
+  updateAppMenu();
+  return currentState();
+}
+
 function createWindow() {
   mainWindow = new BrowserWindow({
     width: 920,
@@ -1391,6 +1418,7 @@ ipcMain.handle("project:switch", (_event, projectId) => switchProject(projectId)
 ipcMain.handle("project:add", (_event, payload) => addProject(payload?.name, payload?.color));
 ipcMain.handle("project:update", (_event, payload) => updateProject(payload));
 ipcMain.handle("segment:reassignProject", (_event, payload) => reassignSegmentProject(payload?.sourceEventId, payload?.projectId));
+ipcMain.handle("segment:updatePauseCategory", (_event, payload) => updatePauseSegmentCategory(payload?.sourceEventId, payload?.category));
 ipcMain.handle("category:add", (_event, name) => {
   const cleanName = String(name || "").trim();
   if (!cleanName) return currentState();

@@ -280,6 +280,17 @@ function projectOptions(selectedId, includeAll = false, includeArchived = false)
   return options.join("");
 }
 
+function pauseCategoryOptions(selectedCategory) {
+  const selected = String(selectedCategory || "");
+  const options = [`<option value=""${selected ? "" : " selected"}>Keep original</option>`];
+  options.push(...(state?.categories || []).map((category) => `
+    <option value="${escapeHtml(category.name)}"${selected === category.name ? " selected" : ""}>
+      ${escapeHtml(category.name)}
+    </option>
+  `));
+  return options.join("");
+}
+
 function syncStatsProjectFilter() {
   if (!statsProjectFilter) return;
   const saved = localStorage.getItem(statsProjectFilterStorageKey) || "all";
@@ -773,13 +784,24 @@ historySegments.addEventListener("click", async (event) => {
 });
 
 historySegments.addEventListener("change", async (event) => {
-  const select = event.target.closest("[data-reassign-segment]");
-  if (!select) return;
-  if (!select.value) return;
-  const sourceEventId = Number(select.dataset.reassignSegment);
-  const projectId = Number(select.value);
-  if (!Number.isInteger(sourceEventId) || !Number.isInteger(projectId)) return;
-  state = await trackerApi.reassignSegmentProject({ sourceEventId, projectId });
+  const projectSelect = event.target.closest("[data-reassign-segment]");
+  const categorySelect = event.target.closest("[data-update-pause-category]");
+  if (!projectSelect && !categorySelect) return;
+  if (projectSelect) {
+    if (!projectSelect.value) return;
+    const sourceEventId = Number(projectSelect.dataset.reassignSegment);
+    const projectId = Number(projectSelect.value);
+    if (!Number.isInteger(sourceEventId) || !Number.isInteger(projectId)) return;
+    state = await trackerApi.reassignSegmentProject({ sourceEventId, projectId });
+  }
+  if (categorySelect) {
+    const sourceEventId = Number(categorySelect.dataset.updatePauseCategory);
+    if (!Number.isInteger(sourceEventId)) return;
+    state = await trackerApi.updatePauseSegmentCategory({
+      sourceEventId,
+      category: categorySelect.value
+    });
+  }
   stats = await trackerApi.getStats(rangeFromStatsControls());
   history = await trackerApi.getHistory(history?.selectedDay);
   render();
@@ -1612,7 +1634,10 @@ function renderHistory() {
   }).join("") : `<p class="empty-state">No entries for this day.</p>`;
 
   historySegments.innerHTML = history.segments.length ? history.segments.slice().reverse().map((segment) => {
-    const reason = segment.reason ? ` · ${segment.reason}` : "";
+    const sourceReason = segment.reason ? `Source: ${segment.reason}` : "";
+    const assignedReason = segment.pauseCategory ? `Category: ${segment.pauseCategory}` : "";
+    const reason = [sourceReason, assignedReason].filter(Boolean).join(" · ");
+    const reasonLabel = reason ? ` · ${reason}` : "";
     const projectBadge = renderProjectBadge(segment.projectName, segment.projectColor);
     const projectEditor = segment.type === "work" && segment.sourceEventId
       ? `
@@ -1625,15 +1650,26 @@ function renderHistory() {
         </label>
       `
       : "";
+    const pauseEditor = segment.type === "pause" && segment.sourceEventId
+      ? `
+        <label class="history-project-edit">
+          <span>Category</span>
+          <select data-update-pause-category="${segment.sourceEventId}">
+            ${pauseCategoryOptions(segment.pauseCategory)}
+          </select>
+        </label>
+      `
+      : "";
     return `
       <article class="event-row history-row">
         <div>
           <strong>${escapeHtml(segment.type)}</strong>
-          <span>${formatTime(segment.start)} - ${formatTime(segment.end)} · ${formatShortDuration(segment.durationMinutes * 60000)}${escapeHtml(reason)}</span>
+          <span>${formatTime(segment.start)} - ${formatTime(segment.end)} · ${formatShortDuration(segment.durationMinutes * 60000)}${escapeHtml(reasonLabel)}</span>
           ${projectBadge}
         </div>
         ${segment.note ? `<small>${escapeHtml(segment.note)}</small>` : ""}
         ${projectEditor}
+        ${pauseEditor}
         <button class="danger-button compact-button" type="button" data-delete-period-start="${escapeHtml(segment.start)}" data-delete-period-end="${escapeHtml(segment.end)}">Delete Period</button>
       </article>
     `;
@@ -1983,6 +2019,7 @@ function createTrackerApi() {
     addProject: () => invoke("get_state"),
     updateProject: () => invoke("get_state"),
     reassignSegmentProject: () => invoke("get_state"),
+    updatePauseSegmentCategory: () => invoke("get_state"),
     addCategory: (name) => invoke("add_category", { name }),
     deleteCategory: (id) => invoke("delete_category", { id }),
     updateSettings: (payload) => invoke("update_settings", { timeZone: payload.timeZone }),

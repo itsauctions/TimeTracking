@@ -13,6 +13,7 @@ contextBridge.exposeInMainWorld("tracker", {
   addProject: (payload) => ipcRenderer.invoke("project:add", payload),
   updateProject: (payload) => ipcRenderer.invoke("project:update", payload),
   reassignSegmentProject: (payload) => ipcRenderer.invoke("segment:reassignProject", payload),
+  updatePauseSegmentCategory: (payload) => ipcRenderer.invoke("segment:updatePauseCategory", payload),
   addCategory: (name) => ipcRenderer.invoke("category:add", name),
   deleteCategory: (id) => ipcRenderer.invoke("category:delete", id),
   updateSettings: (payload) => ipcRenderer.invoke("settings:update", payload),
