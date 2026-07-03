@@ -1,0 +1,320 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; media-src 'self' blob:; connect-src 'self';" />
+  <title>Face Detection Test</title>
+  <style>
+    :root {
+      --bg: #11151c;
+      --panel: #1a2029;
+      --panel-2: #232b36;
+      --text: #e6eaf0;
+      --muted: #8b94a3;
+      --accent: #4f9cf9;
+      --ok: #34d399;
+      --warn: #fbbf24;
+      --danger: #f87171;
+      --border: #2b333f;
+    }
+    * { box-sizing: border-box; }
+    html, body {
+      margin: 0;
+      padding: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      font-size: 13px;
+    }
+    .app {
+      display: grid;
+      grid-template-columns: 1fr 340px;
+      gap: 16px;
+      padding: 16px;
+      height: 100vh;
+    }
+    .stage {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      min-width: 0;
+    }
+    .preview-wrap {
+      position: relative;
+      background: #000;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      overflow: hidden;
+      aspect-ratio: 4 / 3;
+      max-height: 60vh;
+    }
+    #video, #overlay {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+      transform: scaleX(-1);
+    }
+    #overlay { pointer-events: none; }
+    .preview-empty {
+      position: absolute;
+      inset: 0;
+      display: grid;
+      place-items: center;
+      color: var(--muted);
+      text-align: center;
+      padding: 20px;
+    }
+    .status-bar {
+      display: flex;
+      gap: 12px;
+      flex-wrap: wrap;
+      align-items: center;
+      padding: 12px 14px;
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+    }
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 5px 10px;
+      border-radius: 999px;
+      background: var(--panel-2);
+      border: 1px solid var(--border);
+      font-variant-numeric: tabular-nums;
+    }
+    .pill.ok { color: var(--ok); border-color: rgba(52,211,153,0.35); }
+    .pill.warn { color: var(--warn); border-color: rgba(251,191,36,0.35); }
+    .pill.danger { color: var(--danger); border-color: rgba(248,113,113,0.35); }
+    .dot {
+      width: 8px; height: 8px; border-radius: 50%;
+      background: currentColor;
+    }
+    .panel {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 14px;
+      overflow-y: auto;
+    }
+    .panel h2 {
+      margin: 0 0 10px;
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--muted);
+    }
+    .control {
+      margin-bottom: 12px;
+    }
+    .control label {
+      display: flex;
+      justify-content: space-between;
+      margin-bottom: 6px;
+      font-weight: 600;
+    }
+    .control .val {
+      color: var(--accent);
+      font-variant-numeric: tabular-nums;
+    }
+    input[type="range"] {
+      width: 100%;
+      accent-color: var(--accent);
+    }
+    select, button {
+      background: var(--panel-2);
+      color: var(--text);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 6px 10px;
+      font: inherit;
+      cursor: pointer;
+    }
+    button.primary {
+      background: var(--accent);
+      color: #fff;
+      border-color: var(--accent);
+    }
+    button.danger {
+      background: transparent;
+      color: var(--danger);
+      border-color: rgba(248,113,113,0.4);
+    }
+    .row { display: flex; gap: 8px; }
+    .row > * { flex: 1; }
+    .sidebar {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      min-height: 0;
+    }
+    .log {
+      flex: 1;
+      min-height: 0;
+      overflow-y: auto;
+      font-family: ui-monospace, "SF Mono", Menlo, monospace;
+      font-size: 11px;
+      line-height: 1.5;
+    }
+    .log-line { padding: 2px 0; border-bottom: 1px solid rgba(255,255,255,0.04); }
+    .log-line.ok { color: var(--ok); }
+    .log-line.warn { color: var(--warn); }
+    .log-line.danger { color: var(--danger); }
+    .log-line.info { color: var(--muted); }
+    .trigger-state {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+    }
+    .trigger-card {
+      background: var(--panel-2);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 10px;
+    }
+    .trigger-card .label {
+      font-size: 11px;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+    .trigger-card .value {
+      font-size: 18px;
+      font-weight: 700;
+      font-variant-numeric: tabular-nums;
+    }
+    .progress {
+      height: 6px;
+      background: rgba(255,255,255,0.06);
+      border-radius: 3px;
+      overflow: hidden;
+      margin-top: 8px;
+    }
+    .progress > div {
+      height: 100%;
+      background: var(--accent);
+      transition: width 0.15s linear;
+    }
+    .progress.warn > div { background: var(--warn); }
+    .progress.ok > div { background: var(--ok); }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <div class="stage">
+      <div class="preview-wrap">
+        <video id="video" autoplay muted playsinline></video>
+        <canvas id="overlay"></canvas>
+        <div id="previewEmpty" class="preview-empty">
+          Press <strong>Start</strong> to request camera and begin detection.
+        </div>
+      </div>
+      <div class="status-bar">
+        <span class="pill" id="camPill"><span class="dot"></span>Camera off</span>
+        <span class="pill" id="modelPill"><span class="dot"></span>No model</span>
+        <span class="pill" id="facePill"><span class="dot"></span>No face</span>
+        <span class="pill" id="fpsPill">0 fps</span>
+        <span class="pill" id="resPill">—</span>
+        <span class="pill" id="cpuPill">CPU: —</span>
+        <span class="pill" id="memPill">Mem: —</span>
+      </div>
+      <div class="trigger-state">
+        <div class="trigger-card">
+          <div class="label">Absent timer</div>
+          <div class="value" id="absentValue">0.0s</div>
+          <div class="progress warn" id="absentBar"><div style="width:0%"></div></div>
+          <div style="font-size:11px;color:var(--muted);margin-top:6px">
+            Pauses after <span id="absentTarget">5</span>s
+          </div>
+        </div>
+        <div class="trigger-card">
+          <div class="label">Present timer</div>
+          <div class="value" id="presentValue">0.0s</div>
+          <div class="progress ok" id="presentBar"><div style="width:0%"></div></div>
+          <div style="font-size:11px;color:var(--muted);margin-top:6px">
+            Resumes after <span id="presentTarget">5</span>s
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="sidebar">
+      <div class="panel">
+        <h2>Controls</h2>
+        <div class="row" style="margin-bottom:12px">
+          <button id="startBtn" class="primary">Start</button>
+          <button id="stopBtn" class="danger">Stop</button>
+        </div>
+
+        <div class="control">
+          <label>Delegate <select id="delegate">
+            <option value="CPU">CPU</option>
+            <option value="GPU">GPU</option>
+          </select></label>
+        </div>
+
+        <div class="control">
+          <label>Video resolution <select id="res">
+            <option value="320x240">320 x 240</option>
+            <option value="640x480" selected>640 x 480</option>
+            <option value="960x720">960 x 720</option>
+            <option value="1280x720">1280 x 720</option>
+          </select></label>
+        </div>
+
+        <div class="control">
+          <label>Frame rate <select id="fps">
+            <option value="5">5 fps</option>
+            <option value="10" selected>10 fps</option>
+            <option value="15">15 fps</option>
+            <option value="30">30 fps</option>
+          </select></label>
+        </div>
+      </div>
+
+      <div class="panel">
+        <h2>Detection thresholds</h2>
+        <div class="control">
+          <label>minDetectionConfidence <span class="val" id="confVal">0.50</span></label>
+          <input type="range" id="conf" min="0" max="1" step="0.01" value="0.5" />
+        </div>
+        <div class="control">
+          <label>minWidthRatio <span class="val" id="wrVal">0.16</span></label>
+          <input type="range" id="wr" min="0" max="0.6" step="0.01" value="0.16" />
+        </div>
+        <div class="control">
+          <label>minAreaRatio <span class="val" id="arVal">0.025</span></label>
+          <input type="range" id="ar" min="0" max="0.3" step="0.005" value="0.025" />
+        </div>
+        <div class="control">
+          <label>minSuppressionThreshold <span class="val" id="nmsVal">0.3</span></label>
+          <input type="range" id="nms" min="0" max="1" step="0.05" value="0.3" />
+        </div>
+      </div>
+
+      <div class="panel">
+        <h2>Trigger timers (seconds)</h2>
+        <div class="control">
+          <label>Absent → Pause <span class="val" id="absentSecVal">5</span></label>
+          <input type="range" id="absentSec" min="1" max="60" step="1" value="5" />
+        </div>
+        <div class="control">
+          <label>Present → Resume <span class="val" id="presentSecVal">5</span></label>
+          <input type="range" id="presentSec" min="1" max="60" step="1" value="5" />
+        </div>
+      </div>
+
+      <div class="panel" style="flex:1;display:flex;flex-direction:column;min-height:120px">
+        <h2>Event log</h2>
+        <button id="clearLog" style="margin-bottom:8px;align-self:flex-start">Clear</button>
+        <div class="log" id="log"></div>
+      </div>
+    </div>
+  </div>
+
+  <script src="face-test.js"></script>
+</body>
+</html>

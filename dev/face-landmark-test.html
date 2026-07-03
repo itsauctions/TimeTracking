@@ -1,0 +1,294 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; media-src 'self' blob:; connect-src 'self';" />
+  <title>Face Landmark Movement Test</title>
+  <style>
+    :root {
+      --bg: #11151c;
+      --panel: #1a2029;
+      --panel-2: #232b36;
+      --text: #e6eaf0;
+      --muted: #8b94a3;
+      --accent: #4f9cf9;
+      --ok: #34d399;
+      --warn: #fbbf24;
+      --danger: #f87171;
+      --purple: #a78bfa;
+      --border: #2b333f;
+    }
+    * { box-sizing: border-box; }
+    html, body {
+      margin: 0; padding: 0;
+      background: var(--bg); color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      font-size: 13px;
+    }
+    .app {
+      display: grid;
+      grid-template-columns: 1fr 360px;
+      gap: 14px;
+      padding: 14px;
+      height: 100vh;
+    }
+    .stage { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+    .preview-wrap {
+      position: relative;
+      background: #000;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      overflow: hidden;
+      aspect-ratio: 4 / 3;
+      max-height: 55vh;
+    }
+    #video, #overlay {
+      position: absolute; inset: 0;
+      width: 100%; height: 100%;
+      object-fit: contain;
+      transform: scaleX(-1);
+    }
+    #overlay { pointer-events: none; }
+    .preview-empty {
+      position: absolute; inset: 0;
+      display: grid; place-items: center;
+      color: var(--muted); text-align: center; padding: 20px;
+    }
+    .status-bar {
+      display: flex; gap: 10px; flex-wrap: wrap; align-items: center;
+      padding: 10px 12px;
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+    }
+    .pill {
+      display: inline-flex; align-items: center; gap: 6px;
+      padding: 4px 9px; border-radius: 999px;
+      background: var(--panel-2); border: 1px solid var(--border);
+      font-variant-numeric: tabular-nums; white-space: nowrap;
+    }
+    .pill.ok { color: var(--ok); border-color: rgba(52,211,153,0.35); }
+    .pill.warn { color: var(--warn); border-color: rgba(251,191,36,0.35); }
+    .pill.danger { color: var(--danger); border-color: rgba(248,113,113,0.35); }
+    .dot { width: 8px; height: 8px; border-radius: 50%; background: currentColor; }
+
+    .meters {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 10px;
+    }
+    .meter {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 12px;
+    }
+    .meter .label {
+      font-size: 11px; color: var(--muted);
+      text-transform: uppercase; letter-spacing: 0.05em;
+    }
+    .meter .value {
+      font-size: 22px; font-weight: 700;
+      font-variant-numeric: tabular-nums;
+      margin-top: 4px;
+    }
+    .meter .sub { font-size: 11px; color: var(--muted); margin-top: 2px; }
+    .bar {
+      height: 6px; background: rgba(255,255,255,0.06);
+      border-radius: 3px; overflow: hidden; margin-top: 8px;
+    }
+    .bar > div { height: 100%; background: var(--accent); transition: width 0.12s linear; }
+    .meter.pos > .bar > div { background: var(--accent); }
+    .meter.rot > .bar > div { background: var(--purple); }
+    .meter.gaze > .bar > div { background: var(--ok); }
+    .meter.expr > .bar > div { background: var(--warn); }
+
+    .sidebar {
+      display: flex; flex-direction: column; gap: 12px;
+      min-height: 0;
+    }
+    .panel {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 14px;
+      overflow-y: auto;
+    }
+    .panel h2 {
+      margin: 0 0 10px;
+      font-size: 12px; text-transform: uppercase;
+      letter-spacing: 0.06em; color: var(--muted);
+    }
+    .control { margin-bottom: 12px; }
+    .control label {
+      display: flex; justify-content: space-between;
+      margin-bottom: 6px; font-weight: 600;
+    }
+    .control .val { color: var(--accent); font-variant-numeric: tabular-nums; }
+    input[type="range"] { width: 100%; accent-color: var(--accent); }
+    select, button {
+      background: var(--panel-2); color: var(--text);
+      border: 1px solid var(--border); border-radius: 6px;
+      padding: 6px 10px; font: inherit; cursor: pointer;
+    }
+    button.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+    button.danger { background: transparent; color: var(--danger); border-color: rgba(248,113,113,0.4); }
+    .row { display: flex; gap: 8px; }
+    .row > * { flex: 1; }
+    .log {
+      flex: 1; min-height: 0; overflow-y: auto;
+      font-family: ui-monospace, "SF Mono", Menlo, monospace;
+      font-size: 11px; line-height: 1.5;
+    }
+    .log-line { padding: 2px 0; border-bottom: 1px solid rgba(255,255,255,0.04); }
+    .log-line.ok { color: var(--ok); }
+    .log-line.warn { color: var(--warn); }
+    .log-line.danger { color: var(--danger); }
+    .log-line.info { color: var(--muted); }
+
+    .keypoint-table {
+      display: grid;
+      grid-template-columns: auto 1fr 1fr 1fr;
+      gap: 4px 10px;
+      font-family: ui-monospace, monospace;
+      font-size: 11px;
+    }
+    .keypoint-table .kname { color: var(--accent); font-weight: 700; }
+    .keypoint-table .kval { color: var(--text); font-variant-numeric: tabular-nums; }
+
+    .blend-grid {
+      display: grid; grid-template-columns: 1fr 1fr; gap: 6px 12px;
+    }
+    .blend-row { display: grid; grid-template-columns: 1fr 40px 1fr; gap: 6px; align-items: center; font-size: 11px; }
+    .blend-row .bn { color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .blend-row .bv { color: var(--text); font-variant-numeric: tabular-nums; text-align: right; }
+    .blend-row .bbar { height: 4px; background: rgba(255,255,255,0.06); border-radius: 2px; overflow: hidden; }
+    .blend-row .bbar > div { height: 100%; background: var(--purple); }
+
+    .legend { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 6px; font-size: 11px; }
+    .legend span { display: inline-flex; align-items: center; gap: 4px; }
+    .legend i { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <div class="stage">
+      <div class="preview-wrap">
+        <video id="video" autoplay muted playsinline></video>
+        <canvas id="overlay"></canvas>
+        <div id="previewEmpty" class="preview-empty">
+          Press <strong>Start</strong> to load the face landmarker and begin movement tracking.
+        </div>
+      </div>
+      <div class="status-bar">
+        <span class="pill" id="camPill"><span class="dot"></span>Camera off</span>
+        <span class="pill" id="modelPill"><span class="dot"></span>No model</span>
+        <span class="pill" id="facePill"><span class="dot"></span>No face</span>
+        <span class="pill" id="fpsPill">0 fps</span>
+        <span class="pill" id="resPill">—</span>
+        <span class="pill" id="cpuPill">CPU: —</span>
+        <span class="pill" id="memPill">Mem: —</span>
+      </div>
+      <div class="meters">
+        <div class="meter pos">
+          <div class="label">Translational movement</div>
+          <div class="value" id="posValue">0.0 <small>px/s</small></div>
+          <div class="sub" id="posSub">nose-tip displacement</div>
+          <div class="bar"><div id="posBar" style="width:0%"></div></div>
+        </div>
+        <div class="meter rot">
+          <div class="label">Rotational movement</div>
+          <div class="value" id="rotValue">0.0 <small>°/s</small></div>
+          <div class="sub" id="rotSub">yaw / pitch / roll</div>
+          <div class="bar"><div id="rotBar" style="width:0%"></div></div>
+        </div>
+        <div class="meter gaze">
+          <div class="label">Gaze shift</div>
+          <div class="value" id="gazeValue">0.0 <small>px/s</small></div>
+          <div class="sub" id="gazeSub">iris vs eye corner</div>
+          <div class="bar"><div id="gazeBar" style="width:0%"></div></div>
+        </div>
+        <div class="meter expr">
+          <div class="label">Expression activity</div>
+          <div class="value" id="exprValue">0.0 <small>%</small></div>
+          <div class="sub" id="exprSub">jaw + blink rate</div>
+          <div class="bar"><div id="exprBar" style="width:0%"></div></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="sidebar">
+      <div class="panel">
+        <h2>Controls</h2>
+        <div class="row" style="margin-bottom:12px">
+          <button id="startBtn" class="primary">Start</button>
+          <button id="stopBtn" class="danger">Stop</button>
+        </div>
+        <div class="control">
+          <label>Delegate <select id="delegate">
+            <option value="CPU">CPU</option>
+            <option value="GPU">GPU</option>
+          </select></label>
+        </div>
+        <div class="control">
+          <label>Video resolution <select id="res">
+            <option value="320x240">320 x 240</option>
+            <option value="640x480" selected>640 x 480</option>
+            <option value="960x720">960 x 720</option>
+            <option value="1280x720">1280 x 720</option>
+          </select></label>
+        </div>
+        <div class="control">
+          <label>Frame rate <select id="fps">
+            <option value="5">5 fps</option>
+            <option value="10" selected>10 fps</option>
+            <option value="15">15 fps</option>
+            <option value="30">30 fps</option>
+          </select></label>
+        </div>
+        <div class="control">
+          <label>Max faces <select id="numFaces">
+            <option value="1" selected>1</option>
+            <option value="2">2</option>
+            <option value="3">3</option>
+          </select></label>
+        </div>
+        <div class="legend">
+          <span><i style="background:#a78bfa"></i>tesselation</span>
+          <span><i style="background:#4f9cf9"></i>key pts</span>
+          <span><i style="background:#34d399"></i>iris</span>
+          <span><i style="background:#fbbf24"></i>mouth</span>
+          <span><i style="background:#f87171"></i>nose</span>
+        </div>
+      </div>
+
+      <div class="panel">
+        <h2>Head pose (deg)</h2>
+        <div class="keypoint-table">
+          <span class="kname">yaw</span><span class="kval" id="poseYaw">0.0</span>
+          <span class="kname">pitch</span><span class="kval" id="posePitch">0.0</span>
+          <span class="kname">roll</span><span class="kval" id="poseRoll">0.0</span>
+        </div>
+      </div>
+
+      <div class="panel">
+        <h2>Key landmarks</h2>
+        <div class="keypoint-table" id="keypointTable"></div>
+      </div>
+
+      <div class="panel">
+        <h2>Blendshapes</h2>
+        <div class="blend-grid" id="blendGrid"></div>
+      </div>
+
+      <div class="panel" style="flex:1;display:flex;flex-direction:column;min-height:100px">
+        <h2>Event log</h2>
+        <button id="clearLog" style="margin-bottom:8px;align-self:flex-start">Clear</button>
+        <div class="log" id="log"></div>
+      </div>
+    </div>
+  </div>
+
+  <script src="face-landmark-test.js"></script>
+</body>
+</html>

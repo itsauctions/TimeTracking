@@ -41,7 +41,6 @@ const visionStatus = document.querySelector("#visionStatus");
 const visionStatusLabel = document.querySelector("#visionStatusLabel");
 const visionStatusMetric = document.querySelector("#visionStatusMetric");
 const cameraToggle = document.querySelector("#cameraToggle");
-const cameraToggleLabel = document.querySelector(".camera-toggle-label");
 const historyDaySelect = document.querySelector("#historyDaySelect");
 const historyDateLabel = document.querySelector("#historyDateLabel");
 const historyEvents = document.querySelector("#historyEvents");
@@ -89,6 +88,7 @@ const autoAwayState = {
   missingSince: null,
   presentSince: null,
   isPaused: false,
+  cameraSuspended: false,
   module: null,
   scanTimer: null,
   stream: null,
@@ -409,6 +409,11 @@ pauseButton.addEventListener("click", () => addEvent("pause", "Other"));
 resumeButton.addEventListener("click", () => addEvent("resume"));
 stopButton.addEventListener("click", () => addEvent("stop"));
 
+cameraToggle.addEventListener("click", () => {
+  autoAwayState.cameraSuspended = !autoAwayState.cameraSuspended;
+  syncAutoAwayMonitor();
+});
+
 quickReasons.addEventListener("click", (event) => {
   const button = event.target.closest("[data-reason]");
   if (!button || state.status !== "working") return;
@@ -692,6 +697,16 @@ function setVisionStatus(label, metric = "", tone = "") {
 
 function syncAutoAwayMonitor() {
   const settings = normalizedAutoAwaySettings();
+  const cameraVisible = settings.enabled;
+  cameraToggle.classList.toggle("hidden", !cameraVisible);
+  cameraToggle.setAttribute("aria-pressed", autoAwayState.cameraSuspended ? "false" : "true");
+
+  if (autoAwayState.cameraSuspended) {
+    stopAutoAwayMonitor();
+    setVisionStatus("Camera suspended", "Toggle to resume", "hidden");
+    return;
+  }
+
   const shouldRun = settings.enabled && (state?.status === "working" || state?.status === "paused");
   if (shouldRun) {
     startAutoAwayMonitor();
