@@ -58,6 +58,7 @@ const visionStatus = document.querySelector("#visionStatus");
 const visionStatusLabel = document.querySelector("#visionStatusLabel");
 const visionStatusMetric = document.querySelector("#visionStatusMetric");
 const cameraToggle = document.querySelector("#cameraToggle");
+const cameraPrivacyNote = document.querySelector("#cameraPrivacyNote");
 const historyDaySelect = document.querySelector("#historyDaySelect");
 const historyDateLabel = document.querySelector("#historyDateLabel");
 const historyEvents = document.querySelector("#historyEvents");
@@ -1072,10 +1073,11 @@ function syncAutoAwayMonitor() {
   const settings = normalizedAutoAwaySettings();
   const cameraVisible = settings.enabled;
   cameraToggle.classList.toggle("hidden", !cameraVisible);
+  cameraPrivacyNote.classList.toggle("hidden", !cameraVisible);
   cameraToggle.setAttribute("aria-pressed", autoAwayState.cameraSuspended ? "false" : "true");
   const cameraTooltip = autoAwayState.cameraSuspended
     ? "Camera monitoring is off. Click to resume auto-away detection."
-    : "Camera monitoring is on for auto-away. Click to turn it off.";
+    : "Camera monitoring is on for auto-away. Detection runs locally; no video, images, or camera data leave this device. Click to turn it off.";
   cameraToggle.title = cameraTooltip;
   cameraToggle.dataset.tooltip = cameraTooltip;
   cameraToggle.setAttribute("aria-label", cameraTooltip);

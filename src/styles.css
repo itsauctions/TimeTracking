@@ -323,7 +323,18 @@ h2 {
   opacity: 0.85;
 }
 
+.camera-privacy-note {
+  flex-basis: 100%;
+  margin: -2px 0 0;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1.3;
+  text-align: right;
+}
+
 .camera-toggle.hidden,
+.camera-privacy-note.hidden,
 .vision-status.hidden {
   display: none;
 }
@@ -613,6 +624,23 @@ dialog::backdrop {
   margin: 0;
   color: var(--muted);
   font-size: 13px;
+}
+
+.setting-note strong {
+  display: block;
+  margin-bottom: 5px;
+  color: var(--text);
+  font-size: 12px;
+  text-transform: uppercase;
+}
+
+.setting-note ul {
+  margin: 0;
+  padding-left: 18px;
+}
+
+.setting-note li + li {
+  margin-top: 4px;
 }
 
 .inline-form {

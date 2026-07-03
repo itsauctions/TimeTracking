@@ -42,6 +42,7 @@
               </span>
               <span class="camera-toggle-label">Camera</span>
             </button>
+            <p class="camera-privacy-note hidden" id="cameraPrivacyNote">Local only. No video, images, or camera data leave this device.</p>
           </div>
         </div>
 
@@ -243,7 +244,16 @@
             <input id="cameraMovementEnabled" type="checkbox">
             <span>Track posture and movement during work</span>
           </label>
-          <p class="setting-note">Hysteresis prevents flickering between states: "Away delay" is how long your face must be missing before pausing; "Return delay" is how long it must be seen again before resuming. Movement tracking stores anonymous minute-level metrics locally (no video is saved). Your computer will ask for camera permission the first time this starts.</p>
+          <div class="setting-note">
+            <strong>Camera privacy</strong>
+            <ul>
+              <li>Detection runs locally on this device.</li>
+              <li>No video, images, or camera data are recorded or sent over the internet.</li>
+              <li>Movement tracking stores anonymous minute-level metrics locally.</li>
+              <li>"Away delay" and "Return delay" prevent flickering between pause and resume.</li>
+              <li>Your computer will ask for camera permission the first time this starts.</li>
+            </ul>
+          </div>
         </fieldset>
         <label for="categoryInput">New pause category</label>
         <div class="inline-form">
