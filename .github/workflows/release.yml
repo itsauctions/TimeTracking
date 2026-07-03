@@ -18,11 +18,11 @@ jobs:
         include:
           - name: macOS DMG
             os: macos-latest
-            build_command: npm run package:mac
+            build_command: npm run package:mac -- --publish never
             release_glob: dist/*.dmg
           - name: Windows Portable
             os: windows-latest
-            build_command: npm run package:win
+            build_command: npm run package:win -- --publish never
             release_glob: dist/*.exe
 
     steps:
@@ -45,15 +45,15 @@ jobs:
 
       - name: Generate checksums
         shell: bash
-        run: |
-          cd dist
-          files=()
-          for pattern in *.dmg *.exe; do
-            for file in $pattern; do
-              [ -f "$file" ] && files+=("$file")
-            done
-          done
-          shasum -a 256 "${files[@]}" > "SHA256SUMS-${{ runner.os }}.txt"
+        run: >
+          node -e "const fs = require('fs'); const crypto = require('crypto');
+          const files = fs.readdirSync('dist').filter((file) => /\.(dmg|exe)$/.test(file));
+          if (!files.length) throw new Error('No release artifacts found');
+          const lines = files.map((file) => {
+          const hash = crypto.createHash('sha256').update(fs.readFileSync(`dist/${file}`)).digest('hex');
+          return `${hash}  ${file}`;
+          });
+          fs.writeFileSync(`dist/SHA256SUMS-${process.env.RUNNER_OS}.txt`, `${lines.join('\n')}\n`);"
 
       - name: Upload release assets
         uses: softprops/action-gh-release@v2
