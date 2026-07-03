@@ -24,6 +24,10 @@
             <p class="eyebrow">Workday</p>
             <h1 id="statusLabel">Ready</h1>
           </div>
+          <label class="project-picker" for="activeProjectSelect">
+            <span>Current Project</span>
+            <select id="activeProjectSelect"></select>
+          </label>
           <div class="vision-block">
             <div class="vision-status hidden" id="visionStatus" aria-live="polite">
               <span class="vision-dot" aria-hidden="true"></span>
@@ -131,6 +135,10 @@
               <span>End</span>
               <input id="statsEndTime" type="time" step="900">
             </label>
+            <label>
+              <span>Project</span>
+              <select id="statsProjectFilter"></select>
+            </label>
           </div>
         </div>
         <div class="day-chart" id="dayTimelineChart"></div>
@@ -157,6 +165,28 @@
       <section class="stats-section">
         <div class="panel-head">
           <h2>Movement</h2>
+          <div class="stats-range-controls movement-controls">
+            <label>
+              <span>From</span>
+              <input id="movementStartDate" type="date">
+            </label>
+            <label>
+              <span>To</span>
+              <input id="movementEndDate" type="date">
+            </label>
+            <label>
+              <span>Start</span>
+              <input id="movementStartTime" type="time" step="900">
+            </label>
+            <label>
+              <span>End</span>
+              <input id="movementEndTime" type="time" step="900">
+            </label>
+            <label>
+              <span>Project</span>
+              <select id="movementProjectFilter"></select>
+            </label>
+          </div>
         </div>
         <div class="movement-cards" id="movementCards"></div>
         <div class="movement-insights" id="movementInsights"></div>
@@ -221,6 +251,21 @@
           <button id="addCategoryButton" type="button">Add</button>
         </div>
         <div class="category-list" id="categoryList"></div>
+        <fieldset class="settings-section">
+          <legend>Projects</legend>
+          <div class="project-add-grid">
+            <label for="projectInput">
+              <span>New project</span>
+              <input id="projectInput" type="text" placeholder="Example: Client Work">
+            </label>
+            <label for="projectColorInput">
+              <span>Color</span>
+              <input id="projectColorInput" type="color" value="#275f9f">
+            </label>
+            <button id="addProjectButton" type="button">Add</button>
+          </div>
+          <div class="project-list" id="projectList"></div>
+        </fieldset>
       </form>
     </dialog>
 

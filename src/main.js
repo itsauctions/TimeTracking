@@ -10,6 +10,9 @@ let db;
 let statusTimer;
 
 const DEFAULT_CATEGORIES = ["Bathroom", "Family", "Break", "Admin", "Meal", "Other"];
+const DEFAULT_PROJECTS = [
+  { name: "General", color: "#647084" }
+];
 const APP_ID = "local.workday-time-tracker";
 const AUTO_AWAY_DEFAULTS = {
   enabled: false,
@@ -34,11 +37,20 @@ function openDatabase() {
   db = new Database(dataPath("workday-time.sqlite"));
   db.pragma("journal_mode = WAL");
   db.exec(`
+    CREATE TABLE IF NOT EXISTS projects (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL UNIQUE,
+      color TEXT NOT NULL,
+      is_archived INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL
+    );
+
     CREATE TABLE IF NOT EXISTS events (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
-      event_type TEXT NOT NULL CHECK(event_type IN ('start', 'pause', 'resume', 'stop')),
+      event_type TEXT NOT NULL CHECK(event_type IN ('start', 'pause', 'resume', 'stop', 'project_switch')),
       reason TEXT,
       note TEXT,
+      project_id INTEGER REFERENCES projects(id),
       occurred_at TEXT NOT NULL
     );
 
@@ -89,6 +101,7 @@ function openDatabase() {
       message TEXT
     );
   `);
+  migrateEventsForProjects();
 
   const insertCategory = db.prepare(`
     INSERT OR IGNORE INTO categories (name, is_default, created_at)
@@ -98,15 +111,51 @@ function openDatabase() {
   for (const category of DEFAULT_CATEGORIES) {
     insertCategory.run(category, 1, now);
   }
+  const insertProject = db.prepare(`
+    INSERT OR IGNORE INTO projects (name, color, is_archived, created_at)
+    VALUES (?, ?, 0, ?)
+  `);
+  for (const project of DEFAULT_PROJECTS) {
+    insertProject.run(project.name, project.color, now);
+  }
+  const generalProject = projectByName("General") || projects(true)[0];
   db.prepare(`
     INSERT OR IGNORE INTO settings (key, value)
     VALUES ('timeZone', ?)
   `).run(Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC");
+  if (generalProject) {
+    setDefaultSetting("activeProjectId", String(generalProject.id));
+  }
   setDefaultSetting("autoAwayEnabled", AUTO_AWAY_DEFAULTS.enabled ? "1" : "0");
   setDefaultSetting("autoAwaySeconds", String(AUTO_AWAY_DEFAULTS.seconds));
   setDefaultSetting("autoAwayPresentSeconds", String(AUTO_AWAY_DEFAULTS.presentSeconds));
   setDefaultSetting("autoAwaySensitivity", AUTO_AWAY_DEFAULTS.sensitivity);
   setDefaultSetting("cameraMovementEnabled", AUTO_AWAY_DEFAULTS.cameraMovementEnabled ? "1" : "0");
+}
+
+function migrateEventsForProjects() {
+  const columns = db.prepare("PRAGMA table_info(events)").all();
+  const hasProjectId = columns.some((column) => column.name === "project_id");
+  const schema = db.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'events'").get()?.sql || "";
+  const allowsProjectSwitch = schema.includes("project_switch");
+  if (hasProjectId && allowsProjectSwitch) return;
+
+  db.exec(`
+    BEGIN;
+    CREATE TABLE events_new (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      event_type TEXT NOT NULL CHECK(event_type IN ('start', 'pause', 'resume', 'stop', 'project_switch')),
+      reason TEXT,
+      note TEXT,
+      project_id INTEGER REFERENCES projects(id),
+      occurred_at TEXT NOT NULL
+    );
+    INSERT INTO events_new (id, event_type, reason, note, project_id, occurred_at)
+    SELECT id, event_type, reason, note, ${hasProjectId ? "project_id" : "NULL"}, occurred_at FROM events;
+    DROP TABLE events;
+    ALTER TABLE events_new RENAME TO events;
+    COMMIT;
+  `);
 }
 
 function getSetting(key, fallback) {
@@ -121,8 +170,10 @@ function setDefaultSetting(key, value) {
 }
 
 function settings() {
+  const activeProjectId = normalizeProjectId(getSetting("activeProjectId", ""));
   return {
     timeZone: getSetting("timeZone", Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC"),
+    activeProjectId,
     autoAwayEnabled: getSetting("autoAwayEnabled", "0") === "1",
     autoAwaySeconds: validateAutoAwaySeconds(getSetting("autoAwaySeconds", String(AUTO_AWAY_DEFAULTS.seconds))),
     autoAwayPresentSeconds: validateAutoAwayPresentSeconds(getSetting("autoAwayPresentSeconds", String(AUTO_AWAY_DEFAULTS.presentSeconds))),
@@ -218,18 +269,38 @@ function todayEvents(timeZone = settings().timeZone) {
 
 function eventsBetween(start, end) {
   return db.prepare(`
-    SELECT id, event_type AS type, reason, note, occurred_at AS occurredAt
+    SELECT
+      events.id,
+      events.event_type AS type,
+      events.reason,
+      events.note,
+      events.project_id AS projectId,
+      projects.name AS projectName,
+      projects.color AS projectColor,
+      projects.is_archived AS projectArchived,
+      events.occurred_at AS occurredAt
     FROM events
+    LEFT JOIN projects ON projects.id = events.project_id
     WHERE occurred_at >= ? AND occurred_at < ?
-    ORDER BY occurred_at ASC, id ASC
+    ORDER BY events.occurred_at ASC, events.id ASC
   `).all(start, end);
 }
 
 function allEvents() {
   return db.prepare(`
-    SELECT id, event_type AS type, reason, note, occurred_at AS occurredAt
+    SELECT
+      events.id,
+      events.event_type AS type,
+      events.reason,
+      events.note,
+      events.project_id AS projectId,
+      projects.name AS projectName,
+      projects.color AS projectColor,
+      projects.is_archived AS projectArchived,
+      events.occurred_at AS occurredAt
     FROM events
-    ORDER BY occurred_at ASC, id ASC
+    LEFT JOIN projects ON projects.id = events.project_id
+    ORDER BY events.occurred_at ASC, events.id ASC
   `).all();
 }
 
@@ -251,24 +322,87 @@ function categories() {
   `).all();
 }
 
+function projects(includeArchived = false) {
+  return db.prepare(`
+    SELECT id, name, color, is_archived AS isArchived
+    FROM projects
+    ${includeArchived ? "" : "WHERE is_archived = 0"}
+    ORDER BY is_archived ASC, lower(name) ASC
+  `).all();
+}
+
+function projectByName(name) {
+  return db.prepare(`
+    SELECT id, name, color, is_archived AS isArchived
+    FROM projects
+    WHERE lower(name) = lower(?)
+  `).get(name);
+}
+
+function projectById(id) {
+  const projectId = Number(id);
+  if (!Number.isInteger(projectId)) return null;
+  return db.prepare(`
+    SELECT id, name, color, is_archived AS isArchived
+    FROM projects
+    WHERE id = ?
+  `).get(projectId);
+}
+
+function normalizeProjectId(value, allowArchived = false) {
+  const projectId = Number(value);
+  const project = Number.isInteger(projectId) ? projectById(projectId) : null;
+  if (project && (allowArchived || !project.isArchived)) return project.id;
+  return null;
+}
+
+function fallbackProject() {
+  const general = projectByName("General");
+  if (general && !general.isArchived) return general;
+  return projects(false)[0] || projects(true)[0] || null;
+}
+
+function activeProjectId() {
+  const appSettings = settings();
+  return appSettings.activeProjectId || fallbackProject()?.id || null;
+}
+
+function projectShape(project) {
+  if (!project) return null;
+  return {
+    id: project.id,
+    name: project.name,
+    color: project.color,
+    isArchived: Boolean(project.isArchived)
+  };
+}
+
 function currentState() {
   const appSettings = settings();
   const events = todayEvents(appSettings.timeZone);
   const latest = events.at(-1);
   let status = "idle";
   if (latest) {
-    if (latest.type === "start" || latest.type === "resume") status = "working";
+    if (latest.type === "start" || latest.type === "resume" || latest.type === "project_switch") status = "working";
     if (latest.type === "pause") status = "paused";
     if (latest.type === "stop") status = "stopped";
   }
+  const totals = calculateTotals(events);
+  const openWorkSegment = totals.segments.filter((segment) => segment.type === "work").at(-1);
+  const selectedProject = status === "working" && openWorkSegment?.projectId
+    ? projectById(openWorkSegment.projectId)
+    : projectById(appSettings.activeProjectId) || fallbackProject();
 
   return {
     status,
     activeSince: status === "working" || status === "paused" ? latest.occurredAt : null,
     events,
     categories: categories(),
+    projects: projects(true),
+    activeProjectId: selectedProject?.id || null,
+    activeProject: projectShape(selectedProject),
     settings: appSettings,
-    totals: calculateTotals(events)
+    totals
   };
 }
 
@@ -279,32 +413,43 @@ function calculateTotals(events, now = new Date()) {
   let openAt = null;
   let openReason = "";
   let openNote = "";
+  let openProject = null;
+  let openEventId = null;
   const segments = [];
 
   for (const event of events) {
     const occurredAt = new Date(event.occurredAt);
-    if (event.type === "start" || event.type === "resume") {
+    if (event.type === "start" || event.type === "resume" || event.type === "project_switch") {
+      if (event.type === "project_switch" && openType === "work" && openAt) {
+        const durationMs = occurredAt - openAt;
+        workMs += durationMs;
+        segments.push(segmentRow("work", openAt, occurredAt, durationMs, "", "", openProject, openEventId));
+      }
       if (openType === "pause" && openAt) {
         const durationMs = occurredAt - openAt;
         pauseMs += durationMs;
-        segments.push(segmentRow("pause", openAt, occurredAt, durationMs, openReason, openNote));
+        segments.push(segmentRow("pause", openAt, occurredAt, durationMs, openReason, openNote, null, openEventId));
       }
       openType = "work";
       openAt = occurredAt;
       openReason = "";
       openNote = "";
+      openProject = projectFromEvent(event);
+      openEventId = event.id;
     }
 
     if (event.type === "pause") {
       if (openType === "work" && openAt) {
         const durationMs = occurredAt - openAt;
         workMs += durationMs;
-        segments.push(segmentRow("work", openAt, occurredAt, durationMs, "", ""));
+        segments.push(segmentRow("work", openAt, occurredAt, durationMs, "", "", openProject, openEventId));
       }
       openType = "pause";
       openAt = occurredAt;
       openReason = event.reason || "";
       openNote = event.note || "";
+      openProject = null;
+      openEventId = event.id;
     }
 
     if (event.type === "stop") {
@@ -312,12 +457,14 @@ function calculateTotals(events, now = new Date()) {
         const durationMs = occurredAt - openAt;
         if (openType === "work") workMs += durationMs;
         if (openType === "pause") pauseMs += durationMs;
-        segments.push(segmentRow(openType, openAt, occurredAt, durationMs, openReason, openNote));
+        segments.push(segmentRow(openType, openAt, occurredAt, durationMs, openReason, openNote, openType === "work" ? openProject : null, openEventId));
       }
       openType = null;
       openAt = null;
       openReason = "";
       openNote = "";
+      openProject = null;
+      openEventId = null;
     }
   }
 
@@ -325,7 +472,7 @@ function calculateTotals(events, now = new Date()) {
     const durationMs = now - openAt;
     if (openType === "work") workMs += durationMs;
     if (openType === "pause") pauseMs += durationMs;
-    segments.push(segmentRow(openType, openAt, now, durationMs, openReason, openNote));
+    segments.push(segmentRow(openType, openAt, now, durationMs, openReason, openNote, openType === "work" ? openProject : null, openEventId));
   }
 
   return { workMs, pauseMs, segments };
@@ -334,11 +481,15 @@ function calculateTotals(events, now = new Date()) {
 function statsSummary(range = {}) {
   const timeZone = settings().timeZone;
   const segments = calculateTotals(allEvents()).segments;
+  const projectId = normalizeProjectId(range.projectId, true);
+  const filteredSegments = projectId
+    ? segments.filter((segment) => segment.type === "work" && segment.projectId === projectId)
+    : segments;
   const days = new Map();
   const weeks = new Map();
   const months = new Map();
 
-  for (const segment of segments) {
+  for (const segment of filteredSegments) {
     const start = new Date(segment.start);
     addSegmentStats(days, todayKey(start, timeZone), segment);
     addSegmentStats(weeks, weekKey(start, timeZone), segment);
@@ -349,7 +500,10 @@ function statsSummary(range = {}) {
     days: Array.from(days.values()).sort((a, b) => b.key.localeCompare(a.key)),
     weeks: Array.from(weeks.values()).sort((a, b) => b.key.localeCompare(a.key)),
     months: Array.from(months.values()).sort((a, b) => b.key.localeCompare(a.key)),
-    chart: chartSummary(segments, range)
+    projects: projects(true),
+    selectedProjectId: projectId,
+    projectTotals: projectTotals(segments),
+    chart: chartSummary(filteredSegments, range)
   };
 }
 
@@ -448,6 +602,9 @@ function chartSummary(segments, rangeInput = {}) {
       day.segments.push({
         type: segment.type,
         reason: segment.reason || "",
+        projectId: segment.projectId || null,
+        projectName: segment.projectName || "",
+        projectColor: segment.projectColor || "",
         start: clippedStart.toISOString(),
         end: clippedEnd.toISOString(),
         startMinute: Math.max(range.startMinute, minuteOfDayInZone(clippedStart, timeZone)),
@@ -471,14 +628,19 @@ function addSegmentStats(map, key, segment) {
       workMs: 0,
       pauseMs: 0,
       totalMs: 0,
-      categories: {}
+      categories: {},
+      projects: {}
     });
   }
 
   const bucket = map.get(key);
   const durationMs = Math.round(segment.durationMinutes * 60000);
   bucket.totalMs += durationMs;
-  if (segment.type === "work") bucket.workMs += durationMs;
+  if (segment.type === "work") {
+    bucket.workMs += durationMs;
+    const projectName = segment.projectName || "Unassigned";
+    bucket.projects[projectName] = (bucket.projects[projectName] || 0) + durationMs;
+  }
   if (segment.type === "pause") {
     bucket.pauseMs += durationMs;
     const category = segment.reason || "Uncategorized";
@@ -486,22 +648,60 @@ function addSegmentStats(map, key, segment) {
   }
 }
 
-function segmentRow(type, start, end, durationMs, reason, note) {
+function projectFromEvent(event) {
+  if (!event?.projectId) return null;
+  return {
+    id: event.projectId,
+    name: event.projectName || "Unassigned",
+    color: event.projectColor || "#647084",
+    isArchived: Boolean(event.projectArchived)
+  };
+}
+
+function segmentRow(type, start, end, durationMs, reason, note, project, sourceEventId) {
   return {
     type,
     start: start.toISOString(),
     end: end.toISOString(),
     durationMinutes: Math.round((durationMs / 60000) * 100) / 100,
     reason: reason || "",
-    note: note || ""
+    note: note || "",
+    sourceEventId: sourceEventId || null,
+    projectId: type === "work" ? project?.id || null : null,
+    projectName: type === "work" ? project?.name || "Unassigned" : "",
+    projectColor: type === "work" ? project?.color || "#647084" : "",
+    projectArchived: type === "work" ? Boolean(project?.isArchived) : false
   };
 }
 
-function addEvent(type, reason = "", note = "") {
+function projectTotals(segments) {
+  const totals = new Map();
+  for (const segment of segments) {
+    if (segment.type !== "work") continue;
+    const key = segment.projectId || "unassigned";
+    if (!totals.has(key)) {
+      totals.set(key, {
+        projectId: segment.projectId,
+        projectName: segment.projectName || "Unassigned",
+        projectColor: segment.projectColor || "#647084",
+        workMs: 0
+      });
+    }
+    totals.get(key).workMs += Math.round(segment.durationMinutes * 60000);
+  }
+  return Array.from(totals.values()).sort((a, b) => b.workMs - a.workMs);
+}
+
+function addEvent(type, reason = "", note = "", projectId = null) {
+  const cleanType = ["start", "pause", "resume", "stop", "project_switch"].includes(type) ? type : "start";
+  const eventProjectId = cleanType === "start" || cleanType === "resume" || cleanType === "project_switch"
+    ? normalizeProjectId(projectId, true) || activeProjectId()
+    : null;
   db.prepare(`
-    INSERT INTO events (event_type, reason, note, occurred_at)
-    VALUES (?, ?, ?, ?)
-  `).run(type, reason || null, note || null, new Date().toISOString());
+    INSERT INTO events (event_type, reason, note, project_id, occurred_at)
+    VALUES (?, ?, ?, ?, ?)
+  `).run(cleanType, reason || null, note || null, eventProjectId, new Date().toISOString());
+  if (eventProjectId) setSetting("activeProjectId", String(eventProjectId));
   updateTray();
   updateAppMenu();
   return currentState();
@@ -527,12 +727,13 @@ function formatElapsed(ms) {
 function statusText(state = currentState()) {
   const label = statusLabel(state.status);
   if (!state.activeSince) return label;
-  return `${label} for ${formatElapsed(Date.now() - new Date(state.activeSince).getTime())}`;
+  const project = state.status === "working" && state.activeProject?.name ? ` on ${state.activeProject.name}` : "";
+  return `${label}${project} for ${formatElapsed(Date.now() - new Date(state.activeSince).getTime())}`;
 }
 
 function trayTitle(state = currentState()) {
   if (process.platform !== "darwin") return "";
-  if (state.status === "working") return "Work";
+  if (state.status === "working") return state.activeProject?.name?.slice(0, 16) || "Work";
   if (state.status === "paused") return "Paused";
   if (state.status === "stopped") return "Done";
   return "Timer";
@@ -552,6 +753,8 @@ function exportWorkbook() {
       "segment_start",
       "segment_end",
       "segment_type",
+      "project_id",
+      "project",
       "pause_reason",
       "note",
       "duration_minutes"
@@ -561,6 +764,8 @@ function exportWorkbook() {
       segment.start,
       segment.end,
       segment.type,
+      segment.projectId || "",
+      segment.projectName || "",
       segment.reason,
       segment.note,
       segment.durationMinutes
@@ -570,7 +775,8 @@ function exportWorkbook() {
   return createXlsx([
     { name: "Segments", rows: segmentRows },
     { name: "Summary", rows: [...summaryRows("day", stats.days), ...summaryRows("week", stats.weeks), ...summaryRows("month", stats.months)] },
-    { name: "Category Summary", rows: [...categoryRows("day", stats.days), ...categoryRows("week", stats.weeks), ...categoryRows("month", stats.months)] }
+    { name: "Category Summary", rows: [...categoryRows("day", stats.days), ...categoryRows("week", stats.weeks), ...categoryRows("month", stats.months)] },
+    { name: "Project Summary", rows: [...projectRows("day", stats.days), ...projectRows("week", stats.weeks), ...projectRows("month", stats.months)] }
   ]);
 }
 
@@ -597,6 +803,21 @@ function categoryRows(periodType, periods) {
         period.key,
         category,
         minutes(categoryMs)
+      ]);
+    }
+  }
+  return rows;
+}
+
+function projectRows(periodType, periods) {
+  const rows = [["period_type", "period_key", "project", "project_minutes"]];
+  for (const period of periods) {
+    for (const [project, projectMs] of Object.entries(period.projects || {})) {
+      rows.push([
+        periodType,
+        period.key,
+        project,
+        minutes(projectMs)
       ]);
     }
   }
@@ -790,13 +1011,36 @@ function historyForDay(dayKeyValue = todayKey()) {
   const timeZone = settings().timeZone;
   const range = dayRangeForKey(dayKeyValue, timeZone);
   const events = eventsBetween(range.start, range.end);
+  const segments = calculateTotals(events, new Date(range.end)).segments;
   return {
     selectedDay: dayKeyValue,
     days: eventDayKeys(timeZone),
-    events,
-    segments: calculateTotals(events, new Date(range.end)).segments,
+    events: eventsWithProjectContext(events, segments),
+    segments,
+    projects: projects(true),
     settings: settings()
   };
+}
+
+function eventsWithProjectContext(events, segments) {
+  return events.map((event) => {
+    if (event.projectName) return event;
+    const eventTime = new Date(event.occurredAt).getTime();
+    const relatedWorkSegment = segments.find((segment) => {
+      if (segment.type !== "work" || !segment.projectId) return false;
+      const start = new Date(segment.start).getTime();
+      const end = new Date(segment.end).getTime();
+      return Math.abs(end - eventTime) < 1000 || Math.abs(start - eventTime) < 1000;
+    });
+    if (!relatedWorkSegment) return event;
+    return {
+      ...event,
+      projectId: relatedWorkSegment.projectId,
+      projectName: relatedWorkSegment.projectName,
+      projectColor: relatedWorkSegment.projectColor,
+      projectArchived: relatedWorkSegment.projectArchived
+    };
+  });
 }
 
 function deleteEvent(id) {
@@ -822,6 +1066,101 @@ function deleteEventsForPeriod(start, end) {
   const endDate = new Date(end);
   if (Number.isNaN(startDate.getTime()) || Number.isNaN(endDate.getTime())) return currentState();
   db.prepare("DELETE FROM events WHERE occurred_at >= ? AND occurred_at <= ?").run(startDate.toISOString(), endDate.toISOString());
+  updateTray();
+  updateAppMenu();
+  return currentState();
+}
+
+function setActiveProject(projectId) {
+  const cleanProjectId = normalizeProjectId(projectId, false) || fallbackProject()?.id || null;
+  if (cleanProjectId) setSetting("activeProjectId", String(cleanProjectId));
+  updateTray();
+  updateAppMenu();
+  return currentState();
+}
+
+function switchProject(projectId) {
+  const cleanProjectId = normalizeProjectId(projectId, false) || fallbackProject()?.id || null;
+  if (!cleanProjectId) return currentState();
+  const state = currentState();
+  setSetting("activeProjectId", String(cleanProjectId));
+  if (state.status === "working" && state.activeProjectId !== cleanProjectId) {
+    return addEvent("project_switch", "", "", cleanProjectId);
+  }
+  updateTray();
+  updateAppMenu();
+  return currentState();
+}
+
+function addProject(name, color = "#647084") {
+  const cleanName = String(name || "").trim();
+  if (!cleanName) return currentState();
+  const existing = projectByName(cleanName);
+  if (existing) {
+    db.prepare(`
+      UPDATE projects
+      SET color = ?, is_archived = 0
+      WHERE id = ?
+    `).run(validateProjectColor(color), existing.id);
+    setSetting("activeProjectId", String(existing.id));
+    updateTray();
+    updateAppMenu();
+    return currentState();
+  }
+  db.prepare(`
+    INSERT OR IGNORE INTO projects (name, color, is_archived, created_at)
+    VALUES (?, ?, 0, ?)
+  `).run(cleanName, validateProjectColor(color), new Date().toISOString());
+  const project = projectByName(cleanName);
+  if (project) setSetting("activeProjectId", String(project.id));
+  updateTray();
+  updateAppMenu();
+  return currentState();
+}
+
+function updateProject(payload = {}) {
+  const projectId = Number(payload.id);
+  const existing = Number.isInteger(projectId) ? projectById(projectId) : null;
+  if (!existing) return currentState();
+  const cleanName = String(payload.name || existing.name).trim() || existing.name;
+  const cleanColor = validateProjectColor(payload.color || existing.color);
+  const isArchived = payload.isArchived ? 1 : 0;
+  try {
+    db.prepare(`
+      UPDATE projects
+      SET name = ?, color = ?, is_archived = ?
+      WHERE id = ?
+    `).run(cleanName, cleanColor, isArchived, projectId);
+  } catch {
+    db.prepare(`
+      UPDATE projects
+      SET color = ?, is_archived = ?
+      WHERE id = ?
+    `).run(cleanColor, isArchived, projectId);
+  }
+  if (isArchived && getSetting("activeProjectId", "") === String(projectId)) {
+    const replacement = fallbackProject();
+    if (replacement) setSetting("activeProjectId", String(replacement.id));
+  }
+  updateTray();
+  updateAppMenu();
+  return currentState();
+}
+
+function validateProjectColor(color) {
+  const value = String(color || "").trim();
+  return /^#[0-9a-fA-F]{6}$/.test(value) ? value : "#647084";
+}
+
+function reassignSegmentProject(sourceEventId, projectId) {
+  const eventId = Number(sourceEventId);
+  const cleanProjectId = normalizeProjectId(projectId, true);
+  if (!Number.isInteger(eventId) || !cleanProjectId) return currentState();
+  db.prepare(`
+    UPDATE events
+    SET project_id = ?
+    WHERE id = ? AND event_type IN ('start', 'resume', 'project_switch')
+  `).run(cleanProjectId, eventId);
   updateTray();
   updateAppMenu();
   return currentState();
@@ -1029,10 +1368,15 @@ function sendNavigation(page) {
 ipcMain.handle("state:get", () => currentState());
 ipcMain.handle("stats:get", (_event, range) => statsSummary(range));
 ipcMain.handle("history:get", (_event, dayKeyValue) => historyForDay(dayKeyValue || todayKey()));
-ipcMain.handle("event:add", (_event, payload) => addEvent(payload.type, payload.reason, payload.note));
+ipcMain.handle("event:add", (_event, payload) => addEvent(payload.type, payload.reason, payload.note, payload.projectId));
 ipcMain.handle("event:delete", (_event, id) => deleteEvent(id));
 ipcMain.handle("events:deleteDay", (_event, dayKeyValue) => deleteEventsForDay(dayKeyValue));
 ipcMain.handle("events:deletePeriod", (_event, payload) => deleteEventsForPeriod(payload.start, payload.end));
+ipcMain.handle("project:setActive", (_event, projectId) => setActiveProject(projectId));
+ipcMain.handle("project:switch", (_event, projectId) => switchProject(projectId));
+ipcMain.handle("project:add", (_event, payload) => addProject(payload?.name, payload?.color));
+ipcMain.handle("project:update", (_event, payload) => updateProject(payload));
+ipcMain.handle("segment:reassignProject", (_event, payload) => reassignSegmentProject(payload?.sourceEventId, payload?.projectId));
 ipcMain.handle("category:add", (_event, name) => {
   const cleanName = String(name || "").trim();
   if (!cleanName) return currentState();
@@ -1092,35 +1436,102 @@ function storeMovementMinute(minuteData) {
   );
 }
 
-function getMovementToday() {
+function getMovement(rangeInput = {}) {
   const timeZone = settings().timeZone;
-  const range = dayRangeForKey(todayKey(new Date(), timeZone), timeZone);
-  const rows = db.prepare(`
+  const range = parseStatsRange(rangeInput, timeZone);
+  const selectedProjectId = normalizeProjectId(rangeInput?.projectId, true);
+  const days = [];
+  let queryStart = null;
+  let queryEnd = null;
+  for (let dayKeyValue = range.startDay; dayKeyValue <= range.endDay; dayKeyValue = addDaysToKey(dayKeyValue, 1)) {
+    const start = localMinuteBoundary(dayKeyValue, range.startMinute, timeZone);
+    const end = localMinuteBoundary(dayKeyValue, range.endMinute, timeZone);
+    days.push({ key: dayKeyValue, start: start.toISOString(), end: end.toISOString() });
+    if (!queryStart || start < queryStart) queryStart = start;
+    if (!queryEnd || end > queryEnd) queryEnd = end;
+  }
+
+  let rows = db.prepare(`
     SELECT * FROM movement_minute_metrics
     WHERE minute_start >= ? AND minute_start < ?
     ORDER BY minute_start ASC
-  `).all(range.start, range.end);
+  `).all(queryStart.toISOString(), queryEnd.toISOString()).filter((row) => {
+    const minuteStart = row.minute_start;
+    return days.some((day) => minuteStart >= day.start && minuteStart < day.end);
+  });
 
-  const events = db.prepare(`
+  let events = db.prepare(`
     SELECT * FROM movement_events
     WHERE start_time >= ? AND start_time < ?
     ORDER BY start_time ASC
-  `).all(range.start, range.end);
+  `).all(queryStart.toISOString(), queryEnd.toISOString()).filter((event) => {
+    const start = event.start_time;
+    return days.some((day) => start >= day.start && start < day.end);
+  });
 
   const segments = calculateTotals(allEvents()).segments;
+  const workSegments = [];
+  for (const segment of segments.filter((s) => s.type === "work" && (!selectedProjectId || s.projectId === selectedProjectId))) {
+    const segmentStart = new Date(segment.start);
+    const segmentEnd = new Date(segment.end);
+    for (const day of days) {
+      const windowStart = new Date(day.start);
+      const windowEnd = new Date(day.end);
+      const clippedStart = new Date(Math.max(segmentStart.getTime(), windowStart.getTime()));
+      const clippedEnd = new Date(Math.min(segmentEnd.getTime(), windowEnd.getTime()));
+      if (clippedEnd <= clippedStart) continue;
+      workSegments.push({
+        ...segment,
+        start: clippedStart.toISOString(),
+        end: clippedEnd.toISOString(),
+        durationMinutes: Math.round(((clippedEnd - clippedStart) / 60000) * 100) / 100
+      });
+    }
+  }
+  if (selectedProjectId) {
+    rows = rows.filter((row) => workSegments.some((segment) => intervalOverlaps(
+      row.minute_start,
+      new Date(new Date(row.minute_start).getTime() + 60000).toISOString(),
+      segment.start,
+      segment.end
+    )));
+    events = events.filter((event) => workSegments.some((segment) => intervalOverlaps(
+      event.start_time,
+      event.end_time || event.start_time,
+      segment.start,
+      segment.end
+    )));
+  }
 
   return {
+    timeZone,
+    range,
+    selectedProjectId,
+    windows: days,
     minutes: rows,
     events,
-    workSegments: segments.filter((s) => s.type === "work")
+    workSegments,
+    projectTotals: projectTotals(workSegments)
   };
+}
+
+function intervalOverlaps(startA, endA, startB, endB) {
+  const aStart = new Date(startA).getTime();
+  let aEnd = new Date(endA).getTime();
+  const bStart = new Date(startB).getTime();
+  let bEnd = new Date(endB).getTime();
+  if (![aStart, aEnd, bStart, bEnd].every(Number.isFinite)) return false;
+  if (aEnd <= aStart) aEnd = aStart + 1;
+  if (bEnd <= bStart) bEnd = bStart + 1;
+  return Math.max(aStart, bStart) < Math.min(aEnd, bEnd);
 }
 
 ipcMain.handle("movement:storeMinute", (_event, minuteData) => {
   storeMovementMinute(minuteData);
 });
 
-ipcMain.handle("movement:getToday", () => getMovementToday());
+ipcMain.handle("movement:get", (_event, range) => getMovement(range));
+ipcMain.handle("movement:getToday", () => getMovement());
 
 app.whenReady().then(async () => {
   session.defaultSession.setPermissionRequestHandler((_webContents, permission, callback) => {

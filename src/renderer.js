@@ -12,9 +12,14 @@ const eventList = document.querySelector("#eventList");
 const exportButton = document.querySelector("#exportButton");
 const settingsButton = document.querySelector("#settingsButton");
 const settingsDialog = document.querySelector("#settingsDialog");
+const activeProjectSelect = document.querySelector("#activeProjectSelect");
 const categoryInput = document.querySelector("#categoryInput");
 const addCategoryButton = document.querySelector("#addCategoryButton");
 const categoryList = document.querySelector("#categoryList");
+const projectInput = document.querySelector("#projectInput");
+const projectColorInput = document.querySelector("#projectColorInput");
+const addProjectButton = document.querySelector("#addProjectButton");
+const projectList = document.querySelector("#projectList");
 const timerTab = document.querySelector("#timerTab");
 const statsTab = document.querySelector("#statsTab");
 const historyTab = document.querySelector("#historyTab");
@@ -27,6 +32,11 @@ const movementPage = document.querySelector("#movementPage");
 const movementCards = document.querySelector("#movementCards");
 const movementInsights = document.querySelector("#movementInsights");
 const movementTimeline = document.querySelector("#movementTimeline");
+const movementStartDate = document.querySelector("#movementStartDate");
+const movementEndDate = document.querySelector("#movementEndDate");
+const movementStartTime = document.querySelector("#movementStartTime");
+const movementEndTime = document.querySelector("#movementEndTime");
+const movementProjectFilter = document.querySelector("#movementProjectFilter");
 const dailyStats = document.querySelector("#dailyStats");
 const weeklyStats = document.querySelector("#weeklyStats");
 const monthlyStats = document.querySelector("#monthlyStats");
@@ -36,6 +46,7 @@ const statsStartDate = document.querySelector("#statsStartDate");
 const statsEndDate = document.querySelector("#statsEndDate");
 const statsStartTime = document.querySelector("#statsStartTime");
 const statsEndTime = document.querySelector("#statsEndTime");
+const statsProjectFilter = document.querySelector("#statsProjectFilter");
 const timezoneSelect = document.querySelector("#timezoneSelect");
 const saveSettingsButton = document.querySelector("#saveSettingsButton");
 const autoAwayEnabled = document.querySelector("#autoAwayEnabled");
@@ -57,6 +68,7 @@ let state;
 let stats;
 let history;
 let movement;
+let settingsSnapshot = null;
 const trackerApi = createTrackerApi();
 const themes = [
   { id: "light", label: "Light" },
@@ -79,19 +91,26 @@ const fallbackTimeZones = [
   "Australia/Sydney"
 ];
 const statsRangeStorageKey = "workday-stats-range";
+const movementRangeStorageKey = "workday-movement-range";
+const statsProjectFilterStorageKey = "workday-stats-project-filter";
+const movementProjectFilterStorageKey = "workday-movement-project-filter";
 const AUTO_AWAY_REASON = "Auto-away";
 const autoAwaySampleMs = 1000;
 const autoAwayProfiles = {
-  relaxed: { minConfidence: 0.5, minWidthRatio: 0.16, minAreaRatio: 0.025 },
-  normal: { minConfidence: 0.6, minWidthRatio: 0.2, minAreaRatio: 0.04 },
-  strict: { minConfidence: 0.7, minWidthRatio: 0.25, minAreaRatio: 0.06 }
+  relaxed: { minConfidence: 0.4, minWidthRatio: 0.16, minAreaRatio: 0.025, minSuppressionThreshold: 0.3 },
+  normal: { minConfidence: 0.5, minWidthRatio: 0.16, minAreaRatio: 0.025, minSuppressionThreshold: 0.3 },
+  strict: { minConfidence: 0.6, minWidthRatio: 0.2, minAreaRatio: 0.04, minSuppressionThreshold: 0.3 }
 };
 const autoAwayState = {
   landmarker: null,
+  detector: null,
+  detectorSensitivity: null,
   initializing: false,
   lastFaceAt: 0,
   lastFaceConfidence: 0,
   lastFaceWidthRatio: 0,
+  lastPresenceMetric: null,
+  lastPresenceTitle: "",
   missingSince: null,
   presentSince: null,
   isPaused: false,
@@ -241,15 +260,46 @@ function syncStatsRangeControls(range = readStatsRange()) {
   statsEndDate.value = range.endDay;
   statsStartTime.value = timeInputFromMinutes(range.startMinute);
   statsEndTime.value = timeInputFromMinutes(range.endMinute);
+  syncStatsProjectFilter();
+}
+
+function activeProjects() {
+  const selectedId = state?.activeProjectId;
+  return (state?.projects || []).filter((project) => !project.isArchived || project.id === selectedId);
+}
+
+function projectOptions(selectedId, includeAll = false, includeArchived = false) {
+  const available = includeArchived ? (state?.projects || []) : activeProjects();
+  const options = includeAll ? [`<option value="all">All Projects</option>`] : [];
+  options.push(...available.map((project) => `
+    <option value="${project.id}"${Number(selectedId) === project.id ? " selected" : ""}>
+      ${escapeHtml(project.name)}${project.isArchived ? " (Archived)" : ""}
+    </option>
+  `));
+  return options.join("");
+}
+
+function syncStatsProjectFilter() {
+  if (!statsProjectFilter) return;
+  const saved = localStorage.getItem(statsProjectFilterStorageKey) || "all";
+  const selected = stats?.selectedProjectId ? String(stats.selectedProjectId) : saved;
+  statsProjectFilter.innerHTML = projectOptions(selected === "all" ? null : Number(selected), true, true);
+  statsProjectFilter.value = selected !== "all" && (state?.projects || []).some((project) => String(project.id) === selected)
+    ? selected
+    : "all";
 }
 
 function rangeFromStatsControls() {
   const defaults = defaultStatsRange();
+  const projectId = statsProjectFilter?.value && statsProjectFilter.value !== "all"
+    ? Number(statsProjectFilter.value)
+    : null;
   const range = {
     startDay: statsStartDate.value || defaults.startDay,
     endDay: statsEndDate.value || defaults.endDay,
     startMinute: minutesFromTimeInput(statsStartTime.value, defaults.startMinute),
-    endMinute: minutesFromTimeInput(statsEndTime.value, defaults.endMinute)
+    endMinute: minutesFromTimeInput(statsEndTime.value, defaults.endMinute),
+    projectId: Number.isInteger(projectId) ? projectId : null
   };
   if (range.endDay < range.startDay) {
     [range.startDay, range.endDay] = [range.endDay, range.startDay];
@@ -258,12 +308,102 @@ function rangeFromStatsControls() {
     range.endMinute = Math.min(1440, range.startMinute + 60);
   }
   writeStatsRange(range);
+  localStorage.setItem(statsProjectFilterStorageKey, range.projectId ? String(range.projectId) : "all");
   return range;
 }
 
 async function refreshStats() {
   stats = await trackerApi.getStats(rangeFromStatsControls());
   renderStats();
+}
+
+function defaultMovementRange() {
+  const today = formatInputDate(new Date());
+  return {
+    startDay: today,
+    endDay: today,
+    startMinute: 6 * 60,
+    endMinute: 20 * 60
+  };
+}
+
+function readMovementRange() {
+  const defaults = defaultMovementRange();
+  try {
+    const saved = JSON.parse(localStorage.getItem(movementRangeStorageKey) || "{}");
+    return {
+      startDay: /^\d{4}-\d{2}-\d{2}$/.test(saved.startDay) ? saved.startDay : defaults.startDay,
+      endDay: /^\d{4}-\d{2}-\d{2}$/.test(saved.endDay) ? saved.endDay : defaults.endDay,
+      startMinute: Number.isFinite(saved.startMinute) ? saved.startMinute : defaults.startMinute,
+      endMinute: Number.isFinite(saved.endMinute) ? saved.endMinute : defaults.endMinute
+    };
+  } catch {
+    return defaults;
+  }
+}
+
+function writeMovementRange(range) {
+  localStorage.setItem(movementRangeStorageKey, JSON.stringify(range));
+}
+
+function syncMovementRangeControls(range = readMovementRange()) {
+  movementStartDate.value = range.startDay;
+  movementEndDate.value = range.endDay;
+  movementStartTime.value = timeInputFromMinutes(range.startMinute);
+  movementEndTime.value = timeInputFromMinutes(range.endMinute);
+  syncMovementProjectFilter();
+}
+
+function syncMovementProjectFilter() {
+  if (!movementProjectFilter) return;
+  const saved = localStorage.getItem(movementProjectFilterStorageKey) || "all";
+  const selected = movement?.selectedProjectId ? String(movement.selectedProjectId) : saved;
+  movementProjectFilter.innerHTML = projectOptions(selected === "all" ? null : Number(selected), true, true);
+  movementProjectFilter.value = selected !== "all" && (state?.projects || []).some((project) => String(project.id) === selected)
+    ? selected
+    : "all";
+}
+
+function rangeFromMovementControls() {
+  const defaults = defaultMovementRange();
+  const projectId = movementProjectFilter?.value && movementProjectFilter.value !== "all"
+    ? Number(movementProjectFilter.value)
+    : null;
+  const range = {
+    startDay: movementStartDate.value || defaults.startDay,
+    endDay: movementEndDate.value || defaults.endDay,
+    startMinute: minutesFromTimeInput(movementStartTime.value, defaults.startMinute),
+    endMinute: minutesFromTimeInput(movementEndTime.value, defaults.endMinute),
+    projectId: Number.isInteger(projectId) ? projectId : null
+  };
+  if (range.endDay < range.startDay) {
+    [range.startDay, range.endDay] = [range.endDay, range.startDay];
+  }
+  if (range.endMinute <= range.startMinute) {
+    range.endMinute = Math.min(1440, range.startMinute + 60);
+  }
+  writeMovementRange(range);
+  localStorage.setItem(movementProjectFilterStorageKey, range.projectId ? String(range.projectId) : "all");
+  return range;
+}
+
+async function refreshMovement() {
+  try {
+    movement = await trackerApi.getMovement(rangeFromMovementControls());
+  } catch (err) {
+    console.error("Failed to load movement data", err);
+    movement = { error: err?.message || "Movement data failed to load", minutes: [], events: [], workSegments: [] };
+  }
+  renderMovement();
+}
+
+async function loadMovementForCurrentRange() {
+  try {
+    return await trackerApi.getMovement(rangeFromMovementControls());
+  } catch (err) {
+    console.error("Failed to load movement data", err);
+    return { error: err?.message || "Movement data failed to load", minutes: [], events: [], workSegments: [] };
+  }
 }
 
 function escapeHtml(value) {
@@ -309,6 +449,8 @@ function render() {
   pauseButton.disabled = state.status !== "working";
   resumeButton.disabled = state.status !== "paused";
   stopButton.disabled = state.status === "idle" || state.status === "stopped";
+  activeProjectSelect.innerHTML = projectOptions(state.activeProjectId, false, false);
+  if (state.activeProjectId) activeProjectSelect.value = String(state.activeProjectId);
 
   quickReasons.innerHTML = state.categories
     .map((category) => {
@@ -325,16 +467,28 @@ function render() {
       </div>
     `)
     .join("");
+  projectList.innerHTML = (state.projects || [])
+    .map((project) => `
+      <div class="project-row ${project.isArchived ? "is-archived" : ""}" data-project-row="${project.id}">
+        <span class="project-swatch" style="background:${escapeHtml(project.color)}"></span>
+        <input class="project-name-input" type="text" value="${escapeHtml(project.name)}" data-project-name="${project.id}" aria-label="Project name">
+        <input class="project-color-input" type="color" value="${escapeHtml(project.color)}" data-project-color="${project.id}" aria-label="Project color">
+        <button class="compact-button" type="button" data-project-save="${project.id}">Save</button>
+        <button class="compact-button" type="button" data-project-archive="${project.id}" data-project-archived="${project.isArchived ? "1" : "0"}">${project.isArchived ? "Restore" : "Archive"}</button>
+      </div>
+    `)
+    .join("");
 
   eventList.innerHTML = state.events.length
     ? state.events.slice().reverse().map((event) => {
       const reason = event.reason ? ` · ${event.reason}` : "";
+      const project = event.projectName ? ` · ${event.projectName}` : "";
       const note = event.note ? `<small>${escapeHtml(event.note)}</small>` : "";
       return `
         <article class="event-row">
           <div>
             <strong>${escapeHtml(event.type)}</strong>
-            <span>${formatTime(event.occurredAt)}${escapeHtml(reason)}</span>
+            <span>${formatTime(event.occurredAt)}${escapeHtml(project)}${escapeHtml(reason)}</span>
           </div>
           ${note}
         </article>
@@ -351,7 +505,9 @@ function render() {
 async function loadState() {
   state = await trackerApi.getState();
   syncStatsRangeControls();
+  syncMovementRangeControls();
   stats = await trackerApi.getStats(rangeFromStatsControls());
+  movement = null;
   history = await trackerApi.getHistory();
   render();
   renderStats();
@@ -362,12 +518,21 @@ async function addEvent(type, reason = "") {
   const payload = {
     type,
     reason: type === "pause" || type === "stop" ? reason : "",
-    note: noteInput.value.trim()
+    note: noteInput.value.trim(),
+    projectId: type === "start" || type === "resume" ? Number(activeProjectSelect.value) : null
   };
   state = await trackerApi.addEvent(payload);
   stats = await trackerApi.getStats(rangeFromStatsControls());
   history = await trackerApi.getHistory();
   noteInput.value = "";
+  render();
+  renderStats();
+  renderHistory();
+}
+
+async function refreshAfterProjectChange(selectedDay = history?.selectedDay) {
+  stats = await trackerApi.getStats(rangeFromStatsControls());
+  history = await trackerApi.getHistory(selectedDay);
   render();
   renderStats();
   renderHistory();
@@ -448,6 +613,57 @@ addCategoryButton.addEventListener("click", async () => {
   renderHistory();
 });
 
+activeProjectSelect.addEventListener("change", async () => {
+  const projectId = Number(activeProjectSelect.value);
+  if (!Number.isInteger(projectId)) return;
+  state = state.status === "working"
+    ? await trackerApi.switchProject(projectId)
+    : await trackerApi.setActiveProject(projectId);
+  await refreshAfterProjectChange();
+});
+
+addProjectButton.addEventListener("click", async () => {
+  await addProjectFromSettings();
+});
+
+async function addProjectFromSettings() {
+  const name = projectInput.value.trim();
+  if (!name) return;
+  state = await trackerApi.addProject({ name, color: projectColorInput.value });
+  projectInput.value = "";
+  await refreshAfterProjectChange();
+}
+
+projectInput.addEventListener("keydown", async (event) => {
+  if (event.key !== "Enter") return;
+  event.preventDefault();
+  await addProjectFromSettings();
+});
+
+projectList.addEventListener("click", async (event) => {
+  const saveButton = event.target.closest("[data-project-save]");
+  const archiveButton = event.target.closest("[data-project-archive]");
+  const id = Number(saveButton?.dataset.projectSave || archiveButton?.dataset.projectArchive);
+  if (!Number.isInteger(id)) return;
+  const project = (state.projects || []).find((item) => item.id === id);
+  if (!project) return;
+  const row = event.target.closest("[data-project-row]");
+  if (saveButton) {
+    const name = row.querySelector("[data-project-name]")?.value?.trim() || project.name;
+    const color = row.querySelector("[data-project-color]")?.value || project.color;
+    state = await trackerApi.updateProject({ id, name, color, isArchived: project.isArchived });
+  }
+  if (archiveButton) {
+    state = await trackerApi.updateProject({
+      id,
+      name: project.name,
+      color: project.color,
+      isArchived: !project.isArchived
+    });
+  }
+  await refreshAfterProjectChange();
+});
+
 categoryList.addEventListener("click", async (event) => {
   const button = event.target.closest("[data-category-id]");
   if (!button) return;
@@ -472,15 +688,17 @@ historyTab.addEventListener("click", async () => {
   showPage("history");
 });
 movementTab.addEventListener("click", async () => {
-  try {
-    movement = await trackerApi.getMovementToday();
-  } catch (err) {
-    movement = null;
+  if (!state?.settings?.cameraMovementEnabled) {
+    showPage("timer");
+    return;
   }
+  movement = null;
   showPage("movement");
+  await refreshMovement();
 });
 themeButton.addEventListener("click", cycleTheme);
 saveSettingsButton.addEventListener("click", async () => {
+  if (!settingsAreDirty()) return;
   state = await trackerApi.updateSettings({
     timeZone: timezoneSelect.value,
     autoAwayEnabled: autoAwayEnabled.checked,
@@ -494,11 +712,32 @@ saveSettingsButton.addEventListener("click", async () => {
   render();
   renderStats();
   renderHistory();
+  if (!state?.settings?.cameraMovementEnabled) showPage("timer");
 });
+
+for (const input of [
+  timezoneSelect,
+  autoAwayEnabled,
+  autoAwaySeconds,
+  autoAwayPresentSeconds,
+  autoAwaySensitivity,
+  cameraMovementEnabled
+]) {
+  input.addEventListener("input", updateSettingsSaveState);
+  input.addEventListener("change", updateSettingsSaveState);
+}
 
 for (const input of [statsStartDate, statsEndDate, statsStartTime, statsEndTime]) {
   input.addEventListener("change", refreshStats);
 }
+
+statsProjectFilter.addEventListener("change", refreshStats);
+
+for (const input of [movementStartDate, movementEndDate, movementStartTime, movementEndTime]) {
+  input.addEventListener("change", refreshMovement);
+}
+
+movementProjectFilter.addEventListener("change", refreshMovement);
 
 historyDaySelect.addEventListener("change", async () => {
   history = await trackerApi.getHistory(historyDaySelect.value);
@@ -532,6 +771,21 @@ historySegments.addEventListener("click", async (event) => {
   renderHistory();
 });
 
+historySegments.addEventListener("change", async (event) => {
+  const select = event.target.closest("[data-reassign-segment]");
+  if (!select) return;
+  if (!select.value) return;
+  const sourceEventId = Number(select.dataset.reassignSegment);
+  const projectId = Number(select.value);
+  if (!Number.isInteger(sourceEventId) || !Number.isInteger(projectId)) return;
+  state = await trackerApi.reassignSegmentProject({ sourceEventId, projectId });
+  stats = await trackerApi.getStats(rangeFromStatsControls());
+  history = await trackerApi.getHistory(history?.selectedDay);
+  render();
+  renderStats();
+  renderHistory();
+});
+
 deleteDayButton.addEventListener("click", async () => {
   const dayKey = history?.selectedDay;
   if (!dayKey) return;
@@ -545,9 +799,10 @@ deleteDayButton.addEventListener("click", async () => {
 });
 
 function showPage(page) {
-  const showingStats = page === "stats";
-  const showingHistory = page === "history";
-  const showingMovement = page === "movement";
+  const selectedPage = page === "movement" && !state?.settings?.cameraMovementEnabled ? "timer" : page;
+  const showingStats = selectedPage === "stats";
+  const showingHistory = selectedPage === "history";
+  const showingMovement = selectedPage === "movement";
   timerPage.classList.toggle("hidden", showingStats || showingHistory || showingMovement);
   statsPage.classList.toggle("hidden", !showingStats);
   historyPage.classList.toggle("hidden", !showingHistory);
@@ -561,6 +816,7 @@ function showPage(page) {
 
 function renderStats() {
   if (!stats) return;
+  syncStatsProjectFilter();
   renderDayTimeline();
   dailyStats.innerHTML = stats.days.length ? stats.days.map(renderStatsCard).join("") : emptyStats();
   weeklyStats.innerHTML = stats.weeks.length ? stats.weeks.map(renderStatsCard).join("") : emptyStats();
@@ -600,10 +856,14 @@ function renderDayTimeline() {
     const segments = day.segments.map((segment) => {
       const left = ((segment.startMinute - chart.range.startMinute) / totalWindow) * 100;
       const width = Math.max(0.8, ((segment.endMinute - segment.startMinute) / totalWindow) * 100);
-      const label = `${segment.type}${segment.reason ? ` · ${segment.reason}` : ""} · ${formatShortDuration(segment.durationMs)}`;
+      const label = `${segment.type}${segment.projectName ? ` · ${segment.projectName}` : ""}${segment.reason ? ` · ${segment.reason}` : ""} · ${formatShortDuration(segment.durationMs)}`;
+      const projectStyle = segment.type === "work" && segment.projectColor
+        ? `; background:${escapeHtml(segment.projectColor)}`
+        : "";
       return `
         <div class="timeline-segment ${segment.type === "pause" ? "pause-segment" : "work-segment"}"
-          style="left: ${left}%; width: ${width}%"
+          style="left: ${left}%; width: ${width}%${projectStyle}"
+          ${projectStyle ? `data-project-color="1"` : ""}
           title="${escapeHtml(label)}"
           aria-label="${escapeHtml(label)}"></div>
       `;
@@ -629,6 +889,21 @@ function renderStatsCard(item) {
   const workPercent = Math.round((item.workMs / totalMs) * 100);
   const pausePercent = Math.max(0, 100 - workPercent);
   const maxCategoryMs = Math.max(...Object.values(item.categories), 1);
+  const maxProjectMs = Math.max(...Object.values(item.projects || {}), 1);
+  const projectRows = Object.entries(item.projects || {})
+    .sort((a, b) => b[1] - a[1])
+    .map(([name, ms]) => `
+      <div class="category-row">
+        <div class="category-row-head">
+          <span>${escapeHtml(name)}</span>
+          <strong>${formatShortDuration(ms)}</strong>
+        </div>
+        <div class="bar-track" aria-hidden="true">
+          <div class="bar-fill work-fill" style="width: ${Math.max(3, Math.round((ms / maxProjectMs) * 100))}%"></div>
+        </div>
+      </div>
+    `)
+    .join("") || `<p class="empty-state">No project time yet.</p>`;
   const categoryRows = Object.entries(item.categories)
     .sort((a, b) => b[1] - a[1])
     .map(([name, ms]) => `
@@ -658,6 +933,9 @@ function renderStatsCard(item) {
         <div class="bar-fill work-fill" style="width: ${workPercent}%"></div>
         <div class="bar-fill pause-fill" style="width: ${pausePercent}%"></div>
       </div>
+      <h4 class="stats-subhead">Projects</h4>
+      <div class="category-breakdown">${projectRows}</div>
+      <h4 class="stats-subhead">Pause Categories</h4>
       <div class="category-breakdown">${categoryRows}</div>
     </article>
   `;
@@ -682,6 +960,31 @@ function renderSettings() {
   autoAwayPresentSeconds.value = String(settings.presentSeconds);
   autoAwaySensitivity.value = settings.sensitivity;
   cameraMovementEnabled.checked = state?.settings?.cameraMovementEnabled || false;
+  settingsSnapshot = readSettingsForm();
+  updateSettingsSaveState();
+}
+
+function readSettingsForm() {
+  return {
+    timeZone: timezoneSelect.value,
+    autoAwayEnabled: autoAwayEnabled.checked,
+    autoAwaySeconds: Number(autoAwaySeconds.value),
+    autoAwayPresentSeconds: Number(autoAwayPresentSeconds.value),
+    autoAwaySensitivity: autoAwaySensitivity.value,
+    cameraMovementEnabled: cameraMovementEnabled.checked
+  };
+}
+
+function settingsAreDirty() {
+  if (!settingsSnapshot) return false;
+  const current = readSettingsForm();
+  return Object.keys(settingsSnapshot).some((key) => current[key] !== settingsSnapshot[key]);
+}
+
+function updateSettingsSaveState() {
+  const isDirty = settingsAreDirty();
+  saveSettingsButton.disabled = !isDirty;
+  saveSettingsButton.textContent = isDirty ? "Save" : "Saved";
 }
 
 function normalizedAutoAwaySettings() {
@@ -707,13 +1010,62 @@ function setVisionStatus(label, metric = "", tone = "") {
   if (!visionStatus || !visionStatusLabel || !visionStatusMetric) return;
   if (!label) {
     visionStatus.className = "vision-status hidden";
+    visionStatus.removeAttribute("title");
+    visionStatus.removeAttribute("aria-label");
+    visionStatus.removeAttribute("data-tooltip");
     visionStatusLabel.textContent = "Auto-away";
-    visionStatusMetric.textContent = "Off";
+    setVisionMetric("Off");
     return;
   }
   visionStatus.className = `vision-status ${tone}`.trim();
   visionStatusLabel.textContent = label;
-  visionStatusMetric.textContent = metric;
+  setVisionMetric(metric);
+  const details = visionMetricDescription(metric);
+  const title = details ? `${label}: ${details}` : label;
+  visionStatus.title = title;
+  visionStatus.dataset.tooltip = title;
+  visionStatus.setAttribute("aria-label", title);
+}
+
+const visionIcons = {
+  tracked: `
+    <svg class="vision-icon" viewBox="0 0 20 20" aria-hidden="true">
+      <path d="M6 3.5h8a2.5 2.5 0 0 1 2.5 2.5v8a2.5 2.5 0 0 1-2.5 2.5H6A2.5 2.5 0 0 1 3.5 14V6A2.5 2.5 0 0 1 6 3.5Z"/>
+      <path d="M7.2 8.4h.01M12.8 8.4h.01M7.4 12.1c1.3 1.2 3.9 1.2 5.2 0"/>
+      <path d="M2.5 6V3.5H5M15 3.5h2.5V6M17.5 14v2.5H15M5 16.5H2.5V14"/>
+    </svg>
+  `,
+  detected: `
+    <svg class="vision-icon" viewBox="0 0 20 20" aria-hidden="true">
+      <path d="M4.5 7V4.5H7M13 4.5h2.5V7M15.5 13v2.5H13M7 15.5H4.5V13"/>
+      <circle cx="10" cy="10" r="2.4"/>
+    </svg>
+  `,
+  none: `
+    <svg class="vision-icon" viewBox="0 0 20 20" aria-hidden="true">
+      <circle cx="10" cy="10" r="5.2"/>
+      <path d="M6.4 6.4 13.6 13.6"/>
+      <path d="M8.2 9h.01M11.8 9h.01"/>
+    </svg>
+  `
+};
+
+function setVisionMetric(metric) {
+  if (typeof metric === "object" && metric?.icon && metric?.label) {
+    const icon = visionIcons[metric.icon] || "";
+    visionStatusMetric.classList.remove("hidden");
+    visionStatusMetric.innerHTML = `<span class="vision-metric" title="${escapeHtml(metric.title || metric.label)}">${icon}<span>${escapeHtml(metric.label)}</span></span>`;
+    return;
+  }
+  const text = String(metric || "");
+  visionStatusMetric.textContent = text;
+  visionStatusMetric.classList.toggle("hidden", !text);
+}
+
+function visionMetricDescription(metric) {
+  if (typeof metric === "object" && metric?.title) return metric.title;
+  if (typeof metric === "object" && metric?.label) return metric.label;
+  return String(metric || "");
 }
 
 function syncAutoAwayMonitor() {
@@ -721,9 +1073,16 @@ function syncAutoAwayMonitor() {
   const cameraVisible = settings.enabled;
   cameraToggle.classList.toggle("hidden", !cameraVisible);
   cameraToggle.setAttribute("aria-pressed", autoAwayState.cameraSuspended ? "false" : "true");
+  const cameraTooltip = autoAwayState.cameraSuspended
+    ? "Camera monitoring is off. Click to resume auto-away detection."
+    : "Camera monitoring is on for auto-away. Click to turn it off.";
+  cameraToggle.title = cameraTooltip;
+  cameraToggle.dataset.tooltip = cameraTooltip;
+  cameraToggle.setAttribute("aria-label", cameraTooltip);
 
   const moveEnabled = state?.settings?.cameraMovementEnabled;
   movementTab.classList.toggle("hidden", !moveEnabled);
+  if (!moveEnabled) resetMovementAccumulator();
 
   if (autoAwayState.cameraSuspended) {
     stopAutoAwayMonitor();
@@ -763,6 +1122,28 @@ async function loadCameraModel() {
   return autoAwayState.landmarker;
 }
 
+async function loadFallbackFaceDetector(settings) {
+  const profile = autoAwayProfiles[settings.sensitivity] || autoAwayProfiles.normal;
+  if (autoAwayState.detector && autoAwayState.detectorSensitivity === settings.sensitivity) {
+    return autoAwayState.detector;
+  }
+  const { FaceDetector, FilesetResolver } = await loadVisionModule();
+  const wasmBase = new URL("../node_modules/@mediapipe/tasks-vision/wasm/", window.location.href).toString();
+  const modelPath = new URL("../assets/models/blaze_face_short_range.tflite", window.location.href).toString();
+  const vision = await FilesetResolver.forVisionTasks(wasmBase);
+  autoAwayState.detector = await FaceDetector.createFromOptions(vision, {
+    baseOptions: {
+      modelAssetPath: modelPath,
+      delegate: "CPU"
+    },
+    runningMode: "VIDEO",
+    minDetectionConfidence: profile.minConfidence,
+    minSuppressionThreshold: profile.minSuppressionThreshold
+  });
+  autoAwayState.detectorSensitivity = settings.sensitivity;
+  return autoAwayState.detector;
+}
+
 async function loadVisionModule() {
   if (!autoAwayState.module) {
     autoAwayState.module = await import("../node_modules/@mediapipe/tasks-vision/vision_bundle.mjs");
@@ -775,7 +1156,13 @@ async function startAutoAwayMonitor() {
   autoAwayState.initializing = true;
   setVisionStatus("Starting camera", "Permission may be needed", "pending");
   try {
+    const settings = normalizedAutoAwaySettings();
     await loadCameraModel();
+    try {
+      await loadFallbackFaceDetector(settings);
+    } catch (error) {
+      console.error("Fallback face detector setup failed", error);
+    }
     await startAutoAwayVideo();
     autoAwayState.lastFaceAt = Date.now();
     autoAwayState.missingSince = null;
@@ -837,16 +1224,25 @@ async function scanAutoAwayFrame() {
   if (video.readyState < HTMLMediaElement.HAVE_CURRENT_DATA) return;
 
   const settings = normalizedAutoAwaySettings();
+  if (autoAwayState.detectorSensitivity !== settings.sensitivity) {
+    try {
+      await loadFallbackFaceDetector(settings);
+    } catch (err) {
+      console.error("Fallback face detector reload error", err);
+    }
+  }
   let result;
   try {
     result = autoAwayState.landmarker.detectForVideo(video, performance.now());
   } catch (err) {
     console.error("detectForVideo error", err);
-    return;
+    result = null;
   }
 
   const landmarks = result?.faceLandmarks?.[0];
-  const hasFace = facePresenceFromLandmarks(landmarks);
+  const landmarkFace = facePresenceFromLandmarks(landmarks);
+  const fallbackFace = landmarkFace ? null : fallbackFacePresenceFromDetector(video, settings);
+  const hasFace = landmarkFace || Boolean(fallbackFace);
   const now = Date.now();
 
   sampleMovement(result, now, settings);
@@ -865,13 +1261,22 @@ async function scanAutoAwayFrame() {
         await resumeFromAutoAway();
       }
     } else {
-      setVisionStatus("Camera active", "Face detected", "ok");
+      const metric = facePresenceMetric(fallbackFace);
+      setVisionStatus("Camera active", metric, "ok");
+      if (!state?.settings?.cameraMovementEnabled) {
+        const title = fallbackFace
+          ? "Camera active: face detected for auto-away; movement tracking is off"
+          : "Camera active: face present for auto-away; movement tracking is off";
+        visionStatus.title = title;
+        visionStatus.dataset.tooltip = title;
+        visionStatus.setAttribute("aria-label", title);
+      }
     }
     return;
   }
 
   if (autoAwayState.isPaused) {
-    setVisionStatus("No face", "Paused (auto-away)", "warning");
+    setVisionStatus("No face", { icon: "none", label: "Auto-paused", title: "No face detected" }, "warning");
     return;
   }
 
@@ -880,12 +1285,40 @@ async function scanAutoAwayFrame() {
   }
   const missingMs = now - autoAwayState.missingSince;
   const remainingSeconds = Math.max(0, Math.ceil((settings.seconds * 1000 - missingMs) / 1000));
-  setVisionStatus("No face detected", remainingSeconds ? `Pauses in ${remainingSeconds}s` : "Pausing", "warning");
+  const noFaceMetric = remainingSeconds
+    ? { icon: "none", label: `${remainingSeconds}s`, title: `No face detected. Pauses in ${remainingSeconds}s` }
+    : { icon: "none", label: "Pausing", title: "No face detected" };
+  setVisionStatus("No face detected", noFaceMetric, "warning");
   if (missingMs >= settings.seconds * 1000) {
     autoAwayState.isPaused = true;
     autoAwayState.missingSince = null;
     await addAutoAwayPause();
   }
+}
+
+function facePresenceMetric(fallbackFace) {
+  const moveEnabled = state?.settings?.cameraMovementEnabled;
+  if (!moveEnabled) {
+    return {
+      icon: "detected",
+      label: "Detected",
+      title: fallbackFace
+        ? "Face detected by fallback detector; movement tracking is off"
+        : "Face detected for auto-away; movement tracking is off"
+    };
+  }
+  if (fallbackFace) {
+    return {
+      icon: "detected",
+      label: "Detected",
+      title: "Face detected by fallback detector; movement landmarks are unavailable"
+    };
+  }
+  return {
+    icon: "tracked",
+    label: "Tracking",
+    title: "Face tracked with landmarks; movement metrics are enabled"
+  };
 }
 
 const MOVEMENT_INTERVAL_MS = 60000;
@@ -1091,6 +1524,39 @@ function facePresenceFromLandmarks(landmarks) {
   return true;
 }
 
+function fallbackFacePresenceFromDetector(video, settings) {
+  if (!autoAwayState.detector) return null;
+  const profile = autoAwayProfiles[settings.sensitivity] || autoAwayProfiles.normal;
+  let result;
+  try {
+    result = autoAwayState.detector.detectForVideo(video, performance.now());
+  } catch (err) {
+    console.error("Fallback face detector error", err);
+    return null;
+  }
+  const vw = video.videoWidth || video.width || 640;
+  const vh = video.videoHeight || video.height || 480;
+  let best = null;
+  for (const detection of result?.detections || []) {
+    const confidence = detection.categories?.[0]?.score ?? detection.score?.[0] ?? 0;
+    const box = detection.boundingBox;
+    if (!box || confidence < profile.minConfidence) continue;
+    const width = Number(box.width) || 0;
+    const height = Number(box.height) || 0;
+    const widthRatio = width / vw;
+    const areaRatio = (width * height) / (vw * vh);
+    if (widthRatio < profile.minWidthRatio || areaRatio < profile.minAreaRatio) continue;
+    if (!best || confidence > best.confidence) {
+      best = { confidence, widthRatio, areaRatio };
+    }
+  }
+  if (best) {
+    autoAwayState.lastFaceConfidence = best.confidence;
+    autoAwayState.lastFaceWidthRatio = best.widthRatio;
+  }
+  return best;
+}
+
 function extractPose(matrixData) {
   if (!matrixData || matrixData.length < 12) return null;
   const m = matrixData;
@@ -1129,11 +1595,13 @@ function renderHistory() {
   historyEvents.innerHTML = history.events.length ? history.events.slice().reverse().map((event) => {
     const reason = event.reason ? ` · ${event.reason}` : "";
     const note = event.note ? `<small>${escapeHtml(event.note)}</small>` : "";
+    const projectBadge = renderProjectBadge(event.projectName, event.projectColor);
     return `
       <article class="event-row history-row">
         <div>
           <strong>${escapeHtml(event.type)}</strong>
           <span>${formatTime(event.occurredAt)}${escapeHtml(reason)}</span>
+          ${projectBadge}
         </div>
         ${note}
         <button class="danger-button compact-button" type="button" data-delete-event-id="${event.id}">Delete</button>
@@ -1143,17 +1611,40 @@ function renderHistory() {
 
   historySegments.innerHTML = history.segments.length ? history.segments.slice().reverse().map((segment) => {
     const reason = segment.reason ? ` · ${segment.reason}` : "";
+    const projectBadge = renderProjectBadge(segment.projectName, segment.projectColor);
+    const projectEditor = segment.type === "work" && segment.sourceEventId
+      ? `
+        <label class="history-project-edit">
+          <span>Project</span>
+          <select data-reassign-segment="${segment.sourceEventId}">
+            ${segment.projectId ? "" : `<option value="" selected>Unassigned</option>`}
+            ${projectOptions(segment.projectId, false, true)}
+          </select>
+        </label>
+      `
+      : "";
     return `
       <article class="event-row history-row">
         <div>
           <strong>${escapeHtml(segment.type)}</strong>
           <span>${formatTime(segment.start)} - ${formatTime(segment.end)} · ${formatShortDuration(segment.durationMinutes * 60000)}${escapeHtml(reason)}</span>
+          ${projectBadge}
         </div>
         ${segment.note ? `<small>${escapeHtml(segment.note)}</small>` : ""}
+        ${projectEditor}
         <button class="danger-button compact-button" type="button" data-delete-period-start="${escapeHtml(segment.start)}" data-delete-period-end="${escapeHtml(segment.end)}">Delete Period</button>
       </article>
     `;
   }).join("") : `<p class="empty-state">No time periods for this day.</p>`;
+}
+
+function renderProjectBadge(name, color) {
+  if (!name) return "";
+  return `
+    <span class="project-badge" title="Assigned project: ${escapeHtml(name)}">
+      <i class="project-dot" style="background:${escapeHtml(color || "#647084")}"></i>${escapeHtml(name)}
+    </span>
+  `;
 }
 
 function renderMovement() {
@@ -1164,6 +1655,14 @@ function renderMovement() {
     return;
   }
 
+  if (movement.range) syncMovementRangeControls(movement.range);
+  syncMovementProjectFilter();
+  if (movement.error) {
+    movementCards.innerHTML = `<p class="empty-state">Movement data could not load: ${escapeHtml(movement.error)}</p>`;
+    movementInsights.innerHTML = "";
+    movementTimeline.innerHTML = "";
+    return;
+  }
   const minutes = movement.minutes || [];
   if (!minutes.length) {
     movementCards.innerHTML = `<p class="empty-state">No movement data yet. Start a work session with movement tracking enabled.</p>`;
@@ -1200,11 +1699,33 @@ function renderMovement() {
   `;
 
   const insights = buildMovementInsights(minutes);
+  const projectSummary = renderMovementProjectSummary(movement.projectTotals || []);
   movementInsights.innerHTML = insights.length
-    ? `<h3>Insights</h3><ul class="mv-insight-list">${insights.map((i) => `<li>${escapeHtml(i)}</li>`).join("")}</ul>`
-    : "";
+    ? `${projectSummary}<h3>Insights</h3><ul class="mv-insight-list">${insights.map((i) => `<li>${escapeHtml(i)}</li>`).join("")}</ul>`
+    : projectSummary;
 
   movementTimeline.innerHTML = buildMovementTimeline(minutes, movement.workSegments || []);
+}
+
+function renderMovementProjectSummary(projectTotals) {
+  if (!projectTotals.length) return "";
+  const maxMs = Math.max(...projectTotals.map((project) => project.workMs), 1);
+  return `
+    <h3>Projects</h3>
+    <div class="movement-project-list">
+      ${projectTotals.map((project) => `
+        <div class="category-row">
+          <div class="category-row-head">
+            <span><i class="project-dot" style="background:${escapeHtml(project.projectColor)}"></i>${escapeHtml(project.projectName)}</span>
+            <strong>${formatShortDuration(project.workMs)}</strong>
+          </div>
+          <div class="bar-track" aria-hidden="true">
+            <div class="bar-fill work-fill" style="width:${Math.max(3, Math.round((project.workMs / maxMs) * 100))}%"></div>
+          </div>
+        </div>
+      `).join("")}
+    </div>
+  `;
 }
 
 function formatMovementDuration(s) {
@@ -1265,45 +1786,138 @@ function longestConsecutive(minutes, predicate) {
   return max;
 }
 
-function buildMovementTimeline(minutes, _workSegments) {
+function buildMovementTimeline(minutes, workSegments = []) {
   if (!minutes.length) return "";
 
+  const windows = movement?.windows?.length
+    ? movement.windows
+    : [{ start: minutes[0].minute_start, end: minutes[minutes.length - 1].minute_start }];
+  const startMs = Math.min(...windows.map((w) => new Date(w.start).getTime()).filter(Number.isFinite));
+  const endMs = Math.max(...windows.map((w) => new Date(w.end).getTime()).filter(Number.isFinite));
+  const chartStart = Number.isFinite(startMs) ? startMs : new Date(minutes[0].minute_start).getTime();
+  const chartEnd = Number.isFinite(endMs) && endMs > chartStart
+    ? endMs
+    : new Date(minutes[minutes.length - 1].minute_start).getTime() + 60000;
+  const totalMs = Math.max(1, chartEnd - chartStart);
   const rawMax = Math.max(0.1, ...minutes.map((m) => m.movement_avg || 0));
+  const yMax = Math.max(5, Math.ceil(rawMax / 5) * 5);
   const allLow = minutes.every((m) => (m.movement_avg || 0) < 1);
-  const firstTime = new Date(minutes[0].minute_start);
-  const lastTime = new Date(minutes[minutes.length - 1].minute_start);
+  const width = 840;
+  const height = 220;
+  const pad = { top: 18, right: 18, bottom: 38, left: 46 };
+  const plotW = width - pad.left - pad.right;
+  const plotH = height - pad.top - pad.bottom;
 
   const BLUE = "#4f9cf9";
   const YELLOW = "#fbbf24";
   const RED = "#f87171";
 
-  const bars = minutes.map((m) => {
+  const points = minutes.map((m) => {
+    const date = new Date(m.minute_start);
+    const t = date.getTime();
     const mov = m.movement_avg || 0;
-    const risk = m.posture_risk_score || 0;
-    const rawHeight = rawMax > 0 ? (mov / rawMax) * 100 : 0;
-    const px = 8 + Math.round(rawHeight * 0.92);
-    const color = risk > 50 ? RED : risk > 25 ? YELLOW : BLUE;
-    const time = new Date(m.minute_start).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-    const title = `${time} · mov ${mov.toFixed(1)}px/s · still ${m.stillness_seconds || 0}s · risk ${Math.round(risk)}`;
-    return `<span class="mv-bar" style="height:${px}px;background:${color}" title="${escapeHtml(title)}"></span>`;
+    return {
+      source: m,
+      x: pad.left + (((t - chartStart) / totalMs) * plotW),
+      y: pad.top + ((1 - Math.min(1, mov / yMax)) * plotH),
+      value: mov,
+      risk: m.posture_risk_score || 0,
+      date
+    };
+  }).filter((point) => Number.isFinite(point.x) && Number.isFinite(point.y));
+
+  const linePath = points.map((point, index) => `${index === 0 ? "M" : "L"} ${point.x.toFixed(1)} ${point.y.toFixed(1)}`).join(" ");
+  const xTicks = movementTimeTicks(chartStart, chartEnd);
+  const yTicks = [0, yMax / 2, yMax].map((value) => ({
+    value,
+    y: pad.top + ((1 - value / yMax) * plotH)
+  }));
+  const grid = [
+    ...xTicks.map((tick) => `<line class="mv-chart-grid" x1="${tick.x}" y1="${pad.top}" x2="${tick.x}" y2="${pad.top + plotH}"></line>`),
+    ...yTicks.map((tick) => `<line class="mv-chart-grid" x1="${pad.left}" y1="${tick.y}" x2="${pad.left + plotW}" y2="${tick.y}"></line>`)
+  ].join("");
+  const projectBands = workSegments.map((segment) => {
+    const start = new Date(segment.start).getTime();
+    const end = new Date(segment.end).getTime();
+    const clippedStart = Math.max(chartStart, start);
+    const clippedEnd = Math.min(chartEnd, end);
+    if (!Number.isFinite(clippedStart) || !Number.isFinite(clippedEnd) || clippedEnd <= clippedStart) return "";
+    const x = pad.left + (((clippedStart - chartStart) / totalMs) * plotW);
+    const width = Math.max(2, ((clippedEnd - clippedStart) / totalMs) * plotW);
+    const title = `${segment.projectName || "Unassigned"}\n${formatMovementTooltipTime(new Date(clippedStart))} - ${formatMovementTooltipTime(new Date(clippedEnd))}`;
+    return `<rect class="mv-project-band" x="${x.toFixed(1)}" y="${pad.top}" width="${width.toFixed(1)}" height="${plotH}" fill="${escapeHtml(segment.projectColor || "#647084")}"><title>${escapeHtml(title)}</title></rect>`;
+  }).join("");
+  const pointNodes = points.map((point) => {
+    const color = point.risk > 50 ? RED : point.risk > 25 ? YELLOW : BLUE;
+    const title = `${formatMovementTooltipTime(point.date)}\nMovement ${point.value.toFixed(1)} px/s\nStill ${point.source.stillness_seconds || 0}s\nPosture risk ${Math.round(point.risk)}/100\nFace detected ${point.source.face_detected_seconds || 0}s`;
+    return `
+      <g class="mv-chart-point">
+        <circle class="mv-chart-hit" cx="${point.x.toFixed(1)}" cy="${point.y.toFixed(1)}" r="9">
+          <title>${escapeHtml(title)}</title>
+        </circle>
+        <circle class="mv-chart-dot" cx="${point.x.toFixed(1)}" cy="${point.y.toFixed(1)}" r="3.5" fill="${color}">
+          <title>${escapeHtml(title)}</title>
+        </circle>
+      </g>
+    `;
   }).join("");
 
   return `
     <h3>Movement timeline</h3>
     <div class="mv-timeline-wrap">
-      ${allLow ? `<p class="setting-note" style="margin:0 0 10px">Movement is very low — you're sitting still.</p>` : ""}
+      ${allLow ? `<p class="setting-note" style="margin:0 0 10px">Movement is very low; you're sitting still.</p>` : ""}
       <div class="mv-timeline-legend">
-        <span><i class="mv-legend-dot" style="background:${BLUE}"></i>low risk</span>
-        <span><i class="mv-legend-dot" style="background:${YELLOW}"></i>elevated</span>
-        <span><i class="mv-legend-dot" style="background:${RED}"></i>high risk</span>
+        <span><i class="mv-legend-line" style="background:${BLUE}"></i>movement</span>
+        <span><i class="mv-legend-dot" style="background:${YELLOW}"></i>elevated risk point</span>
+        <span><i class="mv-legend-dot" style="background:${RED}"></i>high risk point</span>
       </div>
-      <div class="mv-timeline-bars">${bars}</div>
-      <div class="mv-timeline-axis">
-        <span>${firstTime.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</span>
-        <span>${lastTime.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</span>
-      </div>
+      <svg class="mv-line-chart" viewBox="0 0 ${width} ${height}" role="img" aria-label="Movement over selected time range">
+        ${projectBands}
+        ${grid}
+        <line class="mv-chart-axis" x1="${pad.left}" y1="${pad.top + plotH}" x2="${pad.left + plotW}" y2="${pad.top + plotH}"></line>
+        <line class="mv-chart-axis" x1="${pad.left}" y1="${pad.top}" x2="${pad.left}" y2="${pad.top + plotH}"></line>
+        ${linePath ? `<path class="mv-chart-line" d="${linePath}"></path>` : ""}
+        ${pointNodes}
+        ${yTicks.map((tick) => `<text class="mv-chart-label mv-chart-y-label" x="${pad.left - 8}" y="${tick.y + 4}" text-anchor="end">${tick.value.toFixed(tick.value % 1 ? 1 : 0)}</text>`).join("")}
+        ${xTicks.map((tick) => `<text class="mv-chart-label" x="${tick.x}" y="${height - 12}" text-anchor="${tick.anchor}">${escapeHtml(tick.label)}</text>`).join("")}
+      </svg>
     </div>
   `;
+}
+
+function movementTimeTicks(startMs, endMs) {
+  const span = Math.max(1, endMs - startMs);
+  const count = span <= 12 * 60 * 60 * 1000 ? 5 : 6;
+  return Array.from({ length: count }, (_, index) => {
+    const ratio = count === 1 ? 0 : index / (count - 1);
+    const date = new Date(startMs + (span * ratio));
+    return {
+      x: (46 + (ratio * (840 - 46 - 18))).toFixed(1),
+      label: formatMovementAxisTime(date, span),
+      anchor: index === 0 ? "start" : index === count - 1 ? "end" : "middle"
+    };
+  });
+}
+
+function formatMovementAxisTime(date, spanMs) {
+  const options = spanMs > 24 * 60 * 60 * 1000
+    ? { month: "short", day: "numeric", hour: "numeric" }
+    : { hour: "numeric", minute: "2-digit" };
+  return new Intl.DateTimeFormat(undefined, {
+    timeZone: state?.settings?.timeZone,
+    ...options
+  }).format(date);
+}
+
+function formatMovementTooltipTime(date) {
+  return new Intl.DateTimeFormat(undefined, {
+    timeZone: state?.settings?.timeZone,
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit"
+  }).format(date);
 }
 
 function currentTheme() {
@@ -1337,7 +1951,7 @@ trackerApi.onNavigate(async (page) => {
     renderHistory();
   }
   if (page === "movement") {
-    try { movement = await trackerApi.getMovementToday(); } catch (_) { movement = null; }
+    movement = await loadMovementForCurrentRange();
   }
   showPage(page);
 });
@@ -1362,6 +1976,11 @@ function createTrackerApi() {
     deleteEvent: (id) => invoke("delete_event", { id }),
     deleteDay: (dayKey) => invoke("delete_day", { dayKey }),
     deletePeriod: (payload) => invoke("delete_period", { start: payload.start, end: payload.end }),
+    setActiveProject: () => invoke("get_state"),
+    switchProject: () => invoke("get_state"),
+    addProject: () => invoke("get_state"),
+    updateProject: () => invoke("get_state"),
+    reassignSegmentProject: () => invoke("get_state"),
     addCategory: (name) => invoke("add_category", { name }),
     deleteCategory: (id) => invoke("delete_category", { id }),
     updateSettings: (payload) => invoke("update_settings", { timeZone: payload.timeZone }),
@@ -1370,6 +1989,7 @@ function createTrackerApi() {
       if (filePath) alert(`Exported workbook:\n${filePath}`);
       return filePath;
     },
+    getMovement: () => Promise.resolve({ minutes: [], events: [], workSegments: [] }),
     onNavigate: (callback) => {
       if (listen) listen("menu:navigate", (event) => callback(event.payload));
     },
