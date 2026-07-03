@@ -6,6 +6,7 @@
   "scripts": {
     "start": "electron .",
     "dev": "electron .",
+    "dev:face": "electron dev/face-test-main.js",
     "postinstall": "electron-rebuild",
     "make:icon": "node scripts/make-ico.js",
     "make:icon:mac": "node scripts/make-mac-icon.js",
@@ -60,5 +61,9 @@
         "zip"
       ]
     }
+  },
+  "allowScripts": {
+    "electron@31.7.7": true,
+    "better-sqlite3@12.11.1": true
   }
 }

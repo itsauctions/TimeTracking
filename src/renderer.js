@@ -35,6 +35,7 @@ const timezoneSelect = document.querySelector("#timezoneSelect");
 const saveSettingsButton = document.querySelector("#saveSettingsButton");
 const autoAwayEnabled = document.querySelector("#autoAwayEnabled");
 const autoAwaySeconds = document.querySelector("#autoAwaySeconds");
+const autoAwayPresentSeconds = document.querySelector("#autoAwayPresentSeconds");
 const autoAwaySensitivity = document.querySelector("#autoAwaySensitivity");
 const visionStatus = document.querySelector("#visionStatus");
 const visionStatusLabel = document.querySelector("#visionStatusLabel");
@@ -84,6 +85,8 @@ const autoAwayState = {
   lastFaceConfidence: 0,
   lastFaceWidthRatio: 0,
   missingSince: null,
+  presentSince: null,
+  isPaused: false,
   module: null,
   scanTimer: null,
   stream: null,
@@ -380,6 +383,25 @@ async function addAutoAwayPause() {
   renderHistory();
 }
 
+async function resumeFromAutoAway() {
+  const latest = await trackerApi.getState();
+  if (latest.status !== "paused") {
+    state = latest;
+    render();
+    return;
+  }
+  state = await trackerApi.addEvent({
+    type: "resume",
+    reason: "",
+    note: ""
+  });
+  stats = await trackerApi.getStats(rangeFromStatsControls());
+  history = await trackerApi.getHistory(history?.selectedDay);
+  render();
+  renderStats();
+  renderHistory();
+}
+
 startButton.addEventListener("click", () => addEvent("start"));
 pauseButton.addEventListener("click", () => addEvent("pause", "Other"));
 resumeButton.addEventListener("click", () => addEvent("resume"));
@@ -441,6 +463,7 @@ saveSettingsButton.addEventListener("click", async () => {
     timeZone: timezoneSelect.value,
     autoAwayEnabled: autoAwayEnabled.checked,
     autoAwaySeconds: Number(autoAwaySeconds.value),
+    autoAwayPresentSeconds: Number(autoAwayPresentSeconds.value),
     autoAwaySensitivity: autoAwaySensitivity.value
   });
   stats = await trackerApi.getStats(rangeFromStatsControls());
@@ -629,20 +652,25 @@ function renderSettings() {
   const settings = normalizedAutoAwaySettings();
   autoAwayEnabled.checked = settings.enabled;
   autoAwaySeconds.value = String(settings.seconds);
+  autoAwayPresentSeconds.value = String(settings.presentSeconds);
   autoAwaySensitivity.value = settings.sensitivity;
 }
 
 function normalizedAutoAwaySettings() {
   const settings = state?.settings || {};
-  const seconds = [15, 30, 60].includes(Number(settings.autoAwaySeconds))
+  const seconds = [10, 15, 30, 60].includes(Number(settings.autoAwaySeconds))
     ? Number(settings.autoAwaySeconds)
-    : 30;
+    : 10;
+  const presentSeconds = [5, 10, 15, 30].includes(Number(settings.autoAwayPresentSeconds))
+    ? Number(settings.autoAwayPresentSeconds)
+    : 10;
   const sensitivity = Object.hasOwn(autoAwayProfiles, settings.autoAwaySensitivity)
     ? settings.autoAwaySensitivity
     : "normal";
   return {
     enabled: Boolean(settings.autoAwayEnabled),
     seconds,
+    presentSeconds,
     sensitivity
   };
 }
@@ -662,7 +690,7 @@ function setVisionStatus(label, metric = "", tone = "") {
 
 function syncAutoAwayMonitor() {
   const settings = normalizedAutoAwaySettings();
-  const shouldRun = settings.enabled && state?.status === "working";
+  const shouldRun = settings.enabled && (state?.status === "working" || state?.status === "paused");
   if (shouldRun) {
     startAutoAwayMonitor();
     return;
@@ -724,13 +752,13 @@ async function startAutoAwayVideo() {
   const video = document.createElement("video");
   video.muted = true;
   video.playsInline = true;
-  video.width = 320;
-  video.height = 240;
+  video.width = 640;
+  video.height = 480;
   const stream = await navigator.mediaDevices.getUserMedia({
     audio: false,
     video: {
-      width: { ideal: 320 },
-      height: { ideal: 240 },
+      width: { ideal: 640 },
+      height: { ideal: 480 },
       frameRate: { ideal: 5, max: 10 }
     }
   });
@@ -758,7 +786,8 @@ function stopAutoAwayMonitor() {
 }
 
 async function scanAutoAwayFrame() {
-  if (state?.status !== "working" || !autoAwayState.video || !autoAwayState.detector) return;
+  if (!autoAwayState.video || !autoAwayState.detector) return;
+  if (state?.status !== "working" && state?.status !== "paused") return;
   const video = autoAwayState.video;
   if (video.readyState < HTMLMediaElement.HAVE_CURRENT_DATA) return;
 
@@ -773,7 +802,24 @@ async function scanAutoAwayFrame() {
     autoAwayState.lastFaceConfidence = face.confidence;
     autoAwayState.lastFaceWidthRatio = face.widthRatio;
     autoAwayState.missingSince = null;
-    setVisionStatus("Camera active", `Face ${Math.round(face.confidence * 100)}%`, "ok");
+    if (autoAwayState.isPaused) {
+      if (!autoAwayState.presentSince) autoAwayState.presentSince = now;
+      const presentMs = now - autoAwayState.presentSince;
+      const remaining = Math.max(0, Math.ceil((settings.presentSeconds * 1000 - presentMs) / 1000));
+      setVisionStatus("Face back", remaining ? `Resumes in ${remaining}s` : "Resuming", "pending");
+      if (presentMs >= settings.presentSeconds * 1000) {
+        autoAwayState.isPaused = false;
+        autoAwayState.presentSince = null;
+        await resumeFromAutoAway();
+      }
+    } else {
+      setVisionStatus("Camera active", `Face ${Math.round(face.confidence * 100)}%`, "ok");
+    }
+    return;
+  }
+
+  if (autoAwayState.isPaused) {
+    setVisionStatus("No face", "Paused (auto-away)", "warning");
     return;
   }
 
@@ -784,14 +830,15 @@ async function scanAutoAwayFrame() {
   const remainingSeconds = Math.max(0, Math.ceil((settings.seconds * 1000 - missingMs) / 1000));
   setVisionStatus("No face detected", remainingSeconds ? `Pauses in ${remainingSeconds}s` : "Pausing", "warning");
   if (missingMs >= settings.seconds * 1000) {
+    autoAwayState.isPaused = true;
     autoAwayState.missingSince = null;
     await addAutoAwayPause();
   }
 }
 
 function bestUsableFace(detections, video, profile) {
-  const width = video.videoWidth || video.width || 320;
-  const height = video.videoHeight || video.height || 240;
+  const width = video.videoWidth || video.width || 640;
+  const height = video.videoHeight || video.height || 480;
   let bestFace = null;
   for (const detection of detections) {
     const score = detection.categories?.[0]?.score ?? detection.score?.[0] ?? 0;

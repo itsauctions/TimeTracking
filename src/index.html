@@ -165,9 +165,19 @@
             <label for="autoAwaySeconds">
               <span>Away delay</span>
               <select id="autoAwaySeconds">
+                <option value="10">10 seconds</option>
                 <option value="15">15 seconds</option>
                 <option value="30">30 seconds</option>
                 <option value="60">60 seconds</option>
+              </select>
+            </label>
+            <label for="autoAwayPresentSeconds">
+              <span>Return delay</span>
+              <select id="autoAwayPresentSeconds">
+                <option value="5">5 seconds</option>
+                <option value="10">10 seconds</option>
+                <option value="15">15 seconds</option>
+                <option value="30">30 seconds</option>
               </select>
             </label>
             <label for="autoAwaySensitivity">
@@ -179,7 +189,7 @@
               </select>
             </label>
           </div>
-          <p class="setting-note">Your computer will ask for camera permission the first time this starts. Frames are checked locally and are not saved.</p>
+          <p class="setting-note">Hysteresis prevents flickering between states: "Away delay" is how long your face must be missing before pausing; "Return delay" is how long it must be seen again before resuming. Your computer will ask for camera permission the first time this starts. Frames are checked locally and are not saved.</p>
         </fieldset>
         <label for="categoryInput">New pause category</label>
         <div class="inline-form">

@@ -1,4 +1,4 @@
-const { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, Tray } = require("electron");
+const { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, session, systemPreferences, Tray } = require("electron");
 const path = require("node:path");
 const fs = require("node:fs");
 const zlib = require("node:zlib");
@@ -13,7 +13,8 @@ const DEFAULT_CATEGORIES = ["Bathroom", "Family", "Break", "Admin", "Meal", "Oth
 const APP_ID = "local.workday-time-tracker";
 const AUTO_AWAY_DEFAULTS = {
   enabled: false,
-  seconds: 30,
+  seconds: 10,
+  presentSeconds: 10,
   sensitivity: "normal"
 };
 
@@ -67,6 +68,7 @@ function openDatabase() {
   `).run(Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC");
   setDefaultSetting("autoAwayEnabled", AUTO_AWAY_DEFAULTS.enabled ? "1" : "0");
   setDefaultSetting("autoAwaySeconds", String(AUTO_AWAY_DEFAULTS.seconds));
+  setDefaultSetting("autoAwayPresentSeconds", String(AUTO_AWAY_DEFAULTS.presentSeconds));
   setDefaultSetting("autoAwaySensitivity", AUTO_AWAY_DEFAULTS.sensitivity);
 }
 
@@ -86,6 +88,7 @@ function settings() {
     timeZone: getSetting("timeZone", Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC"),
     autoAwayEnabled: getSetting("autoAwayEnabled", "0") === "1",
     autoAwaySeconds: validateAutoAwaySeconds(getSetting("autoAwaySeconds", String(AUTO_AWAY_DEFAULTS.seconds))),
+    autoAwayPresentSeconds: validateAutoAwayPresentSeconds(getSetting("autoAwayPresentSeconds", String(AUTO_AWAY_DEFAULTS.presentSeconds))),
     autoAwaySensitivity: validateAutoAwaySensitivity(getSetting("autoAwaySensitivity", AUTO_AWAY_DEFAULTS.sensitivity))
   };
 }
@@ -109,7 +112,12 @@ function validateTimeZone(timeZone) {
 
 function validateAutoAwaySeconds(value) {
   const seconds = Number(value);
-  return [15, 30, 60].includes(seconds) ? seconds : AUTO_AWAY_DEFAULTS.seconds;
+  return [10, 15, 30, 60].includes(seconds) ? seconds : AUTO_AWAY_DEFAULTS.seconds;
+}
+
+function validateAutoAwayPresentSeconds(value) {
+  const seconds = Number(value);
+  return [5, 10, 15, 30].includes(seconds) ? seconds : AUTO_AWAY_DEFAULTS.presentSeconds;
 }
 
 function validateAutoAwaySensitivity(value) {
@@ -1014,13 +1022,29 @@ ipcMain.handle("settings:update", (_event, payload) => {
   setSetting("timeZone", timeZone);
   setSetting("autoAwayEnabled", payload?.autoAwayEnabled ? "1" : "0");
   setSetting("autoAwaySeconds", String(validateAutoAwaySeconds(payload?.autoAwaySeconds)));
+  setSetting("autoAwayPresentSeconds", String(validateAutoAwayPresentSeconds(payload?.autoAwayPresentSeconds)));
   setSetting("autoAwaySensitivity", validateAutoAwaySensitivity(payload?.autoAwaySensitivity));
   updateTray();
   updateAppMenu();
   return currentState();
 });
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
+  session.defaultSession.setPermissionRequestHandler((_webContents, permission, callback) => {
+    callback(permission === "media");
+  });
+
+  if (process.platform === "darwin") {
+    const status = systemPreferences.getMediaAccessStatus("camera");
+    if (status === "not-determined") {
+      try {
+        await systemPreferences.askForMediaAccess("camera");
+      } catch (error) {
+        console.error("Camera permission request failed", error);
+      }
+    }
+  }
+
   openDatabase();
   createWindow();
   createTray();
