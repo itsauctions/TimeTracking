@@ -14,6 +14,7 @@ It is built for simple, repeated use: large buttons, local storage, quick pause 
 - Export an XLSX workbook with raw segments, summary totals, and category summaries.
 - Store data locally in SQLite.
 - Use the Electron desktop build on macOS or Windows, including a macOS menu bar status item.
+- Optionally auto-pause when the local camera no longer detects a large enough face for 15, 30, or 60 seconds.
 - Use the newer Tauri desktop build as an alternate Windows packaging path.
 
 ## Requirements
@@ -114,6 +115,8 @@ Because `better-sqlite3` is a native module, keep the `postinstall` rebuild step
 6. Click **Export XLSX** to create a spreadsheet copy of the tracked time.
 
 Custom pause categories can be added from the settings button in the app navigation.
+
+The auto-away setting is off by default. When enabled in the Electron app, it uses the local camera and bundled MediaPipe face detector assets to decide whether to add an `Auto-away` pause event. Frames are not saved or uploaded.
 
 ## Local Data
 

@@ -30,6 +30,7 @@
     "electron-builder": "^24.13.3"
   },
   "dependencies": {
+    "@mediapipe/tasks-vision": "^0.10.35",
     "better-sqlite3": "^12.11.1"
   },
   "build": {
@@ -51,6 +52,9 @@
     "mac": {
       "icon": "assets/app-icon.icns",
       "category": "public.app-category.productivity",
+      "extendInfo": {
+        "NSCameraUsageDescription": "Workday Time Tracker can use the camera locally to pause tracking when you step away."
+      },
       "target": [
         "dmg",
         "zip"

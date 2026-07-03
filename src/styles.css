@@ -167,6 +167,71 @@ h2 {
   font-size: 22px;
 }
 
+.vision-status {
+  align-self: start;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  min-width: 176px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 9px 11px;
+  background: var(--paper);
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.vision-status strong,
+.vision-status small {
+  display: block;
+  line-height: 1.15;
+}
+
+.vision-status small {
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.vision-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 999px;
+  background: var(--muted);
+}
+
+.vision-status.ok {
+  border-color: color-mix(in srgb, var(--green) 45%, var(--line));
+  color: var(--green);
+}
+
+.vision-status.ok .vision-dot {
+  background: var(--green);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--green) 14%, transparent);
+}
+
+.vision-status.pending {
+  border-color: color-mix(in srgb, var(--blue) 45%, var(--line));
+  color: var(--blue);
+}
+
+.vision-status.pending .vision-dot {
+  background: var(--blue);
+}
+
+.vision-status.warning {
+  border-color: color-mix(in srgb, var(--yellow) 55%, var(--line));
+  color: var(--yellow);
+}
+
+.vision-status.warning .vision-dot {
+  background: var(--yellow);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--yellow) 16%, transparent);
+}
+
 .time-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -328,6 +393,54 @@ dialog::backdrop {
   display: grid;
   gap: 16px;
   padding: 20px;
+}
+
+.settings-section {
+  display: grid;
+  gap: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  margin: 0;
+  padding: 12px;
+}
+
+.settings-section legend {
+  padding: 0 6px;
+  color: var(--muted);
+  font-weight: 800;
+}
+
+.toggle-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.toggle-row input {
+  width: 18px;
+  min-height: 18px;
+}
+
+.settings-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.settings-grid label {
+  display: grid;
+  gap: 6px;
+}
+
+.settings-grid span {
+  font-size: 12px;
+  text-transform: uppercase;
+}
+
+.setting-note {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
 }
 
 .inline-form {
@@ -694,6 +807,7 @@ dialog::backdrop {
   .stats-grid,
   .history-grid,
   .history-controls,
+  .settings-grid,
   .stats-range-controls,
   .timeline-row {
     grid-template-columns: 1fr;

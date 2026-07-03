@@ -23,6 +23,13 @@
             <p class="eyebrow">Workday</p>
             <h1 id="statusLabel">Ready</h1>
           </div>
+          <div class="vision-status hidden" id="visionStatus" aria-live="polite">
+            <span class="vision-dot" aria-hidden="true"></span>
+            <span>
+              <strong id="visionStatusLabel">Auto-away</strong>
+              <small id="visionStatusMetric">Off</small>
+            </span>
+          </div>
         </div>
 
         <div class="time-grid">
@@ -148,6 +155,32 @@
           <select id="timezoneSelect"></select>
           <button id="saveSettingsButton" type="button">Save</button>
         </div>
+        <fieldset class="settings-section">
+          <legend>Auto-away</legend>
+          <label class="toggle-row" for="autoAwayEnabled">
+            <input id="autoAwayEnabled" type="checkbox">
+            <span>Pause when no face is detected</span>
+          </label>
+          <div class="settings-grid">
+            <label for="autoAwaySeconds">
+              <span>Away delay</span>
+              <select id="autoAwaySeconds">
+                <option value="15">15 seconds</option>
+                <option value="30">30 seconds</option>
+                <option value="60">60 seconds</option>
+              </select>
+            </label>
+            <label for="autoAwaySensitivity">
+              <span>Detection</span>
+              <select id="autoAwaySensitivity">
+                <option value="normal">Normal</option>
+                <option value="strict">Strict</option>
+                <option value="relaxed">Relaxed</option>
+              </select>
+            </label>
+          </div>
+          <p class="setting-note">Your computer will ask for camera permission the first time this starts. Frames are checked locally and are not saved.</p>
+        </fieldset>
         <label for="categoryInput">New pause category</label>
         <div class="inline-form">
           <input id="categoryInput" type="text" placeholder="Example: Errand">

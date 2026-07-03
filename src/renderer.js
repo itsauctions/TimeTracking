@@ -33,6 +33,12 @@ const statsStartTime = document.querySelector("#statsStartTime");
 const statsEndTime = document.querySelector("#statsEndTime");
 const timezoneSelect = document.querySelector("#timezoneSelect");
 const saveSettingsButton = document.querySelector("#saveSettingsButton");
+const autoAwayEnabled = document.querySelector("#autoAwayEnabled");
+const autoAwaySeconds = document.querySelector("#autoAwaySeconds");
+const autoAwaySensitivity = document.querySelector("#autoAwaySensitivity");
+const visionStatus = document.querySelector("#visionStatus");
+const visionStatusLabel = document.querySelector("#visionStatusLabel");
+const visionStatusMetric = document.querySelector("#visionStatusMetric");
 const historyDaySelect = document.querySelector("#historyDaySelect");
 const historyDateLabel = document.querySelector("#historyDateLabel");
 const historyEvents = document.querySelector("#historyEvents");
@@ -64,6 +70,25 @@ const fallbackTimeZones = [
   "Australia/Sydney"
 ];
 const statsRangeStorageKey = "workday-stats-range";
+const AUTO_AWAY_REASON = "Auto-away";
+const autoAwaySampleMs = 1000;
+const autoAwayProfiles = {
+  relaxed: { minConfidence: 0.5, minWidthRatio: 0.16, minAreaRatio: 0.025 },
+  normal: { minConfidence: 0.6, minWidthRatio: 0.2, minAreaRatio: 0.04 },
+  strict: { minConfidence: 0.7, minWidthRatio: 0.25, minAreaRatio: 0.06 }
+};
+const autoAwayState = {
+  detector: null,
+  initializing: false,
+  lastFaceAt: 0,
+  lastFaceConfidence: 0,
+  lastFaceWidthRatio: 0,
+  missingSince: null,
+  module: null,
+  scanTimer: null,
+  stream: null,
+  video: null
+};
 
 function formatDuration(ms) {
   const totalSeconds = Math.max(0, Math.floor(ms / 1000));
@@ -308,6 +333,7 @@ function render() {
   refreshComputedTime();
   renderSettings();
   renderThemeButton();
+  syncAutoAwayMonitor();
 }
 
 async function loadState() {
@@ -330,6 +356,25 @@ async function addEvent(type, reason = "") {
   stats = await trackerApi.getStats(rangeFromStatsControls());
   history = await trackerApi.getHistory();
   noteInput.value = "";
+  render();
+  renderStats();
+  renderHistory();
+}
+
+async function addAutoAwayPause() {
+  const latest = await trackerApi.getState();
+  if (latest.status !== "working") {
+    state = latest;
+    render();
+    return;
+  }
+  state = await trackerApi.addEvent({
+    type: "pause",
+    reason: AUTO_AWAY_REASON,
+    note: ""
+  });
+  stats = await trackerApi.getStats(rangeFromStatsControls());
+  history = await trackerApi.getHistory(history?.selectedDay);
   render();
   renderStats();
   renderHistory();
@@ -392,7 +437,12 @@ historyTab.addEventListener("click", async () => {
 });
 themeButton.addEventListener("click", cycleTheme);
 saveSettingsButton.addEventListener("click", async () => {
-  state = await trackerApi.updateSettings({ timeZone: timezoneSelect.value });
+  state = await trackerApi.updateSettings({
+    timeZone: timezoneSelect.value,
+    autoAwayEnabled: autoAwayEnabled.checked,
+    autoAwaySeconds: Number(autoAwaySeconds.value),
+    autoAwaySensitivity: autoAwaySensitivity.value
+  });
   stats = await trackerApi.getStats(rangeFromStatsControls());
   history = await trackerApi.getHistory();
   render();
@@ -576,6 +626,188 @@ function renderSettings() {
     <option value="${escapeHtml(timeZone)}"${timeZone === selected ? " selected" : ""}>${escapeHtml(timeZone)}</option>
   `).join("");
   timezoneSelect.innerHTML = options;
+  const settings = normalizedAutoAwaySettings();
+  autoAwayEnabled.checked = settings.enabled;
+  autoAwaySeconds.value = String(settings.seconds);
+  autoAwaySensitivity.value = settings.sensitivity;
+}
+
+function normalizedAutoAwaySettings() {
+  const settings = state?.settings || {};
+  const seconds = [15, 30, 60].includes(Number(settings.autoAwaySeconds))
+    ? Number(settings.autoAwaySeconds)
+    : 30;
+  const sensitivity = Object.hasOwn(autoAwayProfiles, settings.autoAwaySensitivity)
+    ? settings.autoAwaySensitivity
+    : "normal";
+  return {
+    enabled: Boolean(settings.autoAwayEnabled),
+    seconds,
+    sensitivity
+  };
+}
+
+function setVisionStatus(label, metric = "", tone = "") {
+  if (!visionStatus || !visionStatusLabel || !visionStatusMetric) return;
+  if (!label) {
+    visionStatus.className = "vision-status hidden";
+    visionStatusLabel.textContent = "Auto-away";
+    visionStatusMetric.textContent = "Off";
+    return;
+  }
+  visionStatus.className = `vision-status ${tone}`.trim();
+  visionStatusLabel.textContent = label;
+  visionStatusMetric.textContent = metric;
+}
+
+function syncAutoAwayMonitor() {
+  const settings = normalizedAutoAwaySettings();
+  const shouldRun = settings.enabled && state?.status === "working";
+  if (shouldRun) {
+    startAutoAwayMonitor();
+    return;
+  }
+  stopAutoAwayMonitor();
+  if (settings.enabled) {
+    setVisionStatus("Auto-away ready", "Camera off");
+  } else {
+    setVisionStatus("");
+  }
+}
+
+async function loadFaceDetector() {
+  if (autoAwayState.detector) return autoAwayState.detector;
+  const { FaceDetector, FilesetResolver } = await loadVisionModule();
+  const wasmBase = new URL("../node_modules/@mediapipe/tasks-vision/wasm/", window.location.href).toString();
+  const modelPath = new URL("../assets/models/blaze_face_short_range.tflite", window.location.href).toString();
+  const vision = await FilesetResolver.forVisionTasks(wasmBase);
+  autoAwayState.detector = await FaceDetector.createFromOptions(vision, {
+    baseOptions: {
+      modelAssetPath: modelPath,
+      delegate: "CPU"
+    },
+    runningMode: "VIDEO",
+    minDetectionConfidence: autoAwayProfiles.relaxed.minConfidence
+  });
+  return autoAwayState.detector;
+}
+
+async function loadVisionModule() {
+  if (!autoAwayState.module) {
+    autoAwayState.module = await import("../node_modules/@mediapipe/tasks-vision/vision_bundle.mjs");
+  }
+  return autoAwayState.module;
+}
+
+async function startAutoAwayMonitor() {
+  if (autoAwayState.scanTimer || autoAwayState.initializing) return;
+  autoAwayState.initializing = true;
+  setVisionStatus("Starting camera", "Permission may be needed", "pending");
+  try {
+    await loadFaceDetector();
+    await startAutoAwayVideo();
+    autoAwayState.lastFaceAt = Date.now();
+    autoAwayState.missingSince = null;
+    autoAwayState.scanTimer = setInterval(scanAutoAwayFrame, autoAwaySampleMs);
+    await scanAutoAwayFrame();
+  } catch (error) {
+    console.error("Auto-away camera setup failed", error);
+    setVisionStatus("Camera unavailable", "Check permission", "warning");
+    stopAutoAwayMonitor();
+  } finally {
+    autoAwayState.initializing = false;
+  }
+}
+
+async function startAutoAwayVideo() {
+  if (autoAwayState.video && autoAwayState.stream) return;
+  const video = document.createElement("video");
+  video.muted = true;
+  video.playsInline = true;
+  video.width = 320;
+  video.height = 240;
+  const stream = await navigator.mediaDevices.getUserMedia({
+    audio: false,
+    video: {
+      width: { ideal: 320 },
+      height: { ideal: 240 },
+      frameRate: { ideal: 5, max: 10 }
+    }
+  });
+  video.srcObject = stream;
+  await video.play();
+  autoAwayState.video = video;
+  autoAwayState.stream = stream;
+}
+
+function stopAutoAwayMonitor() {
+  if (autoAwayState.scanTimer) {
+    clearInterval(autoAwayState.scanTimer);
+    autoAwayState.scanTimer = null;
+  }
+  if (autoAwayState.stream) {
+    for (const track of autoAwayState.stream.getTracks()) {
+      track.stop();
+    }
+  }
+  autoAwayState.stream = null;
+  autoAwayState.video = null;
+  autoAwayState.lastFaceConfidence = 0;
+  autoAwayState.lastFaceWidthRatio = 0;
+  autoAwayState.missingSince = null;
+}
+
+async function scanAutoAwayFrame() {
+  if (state?.status !== "working" || !autoAwayState.video || !autoAwayState.detector) return;
+  const video = autoAwayState.video;
+  if (video.readyState < HTMLMediaElement.HAVE_CURRENT_DATA) return;
+
+  const settings = normalizedAutoAwaySettings();
+  const profile = autoAwayProfiles[settings.sensitivity] || autoAwayProfiles.normal;
+  const result = autoAwayState.detector.detectForVideo(video, performance.now());
+  const face = bestUsableFace(result?.detections || [], video, profile);
+  const now = Date.now();
+
+  if (face) {
+    autoAwayState.lastFaceAt = now;
+    autoAwayState.lastFaceConfidence = face.confidence;
+    autoAwayState.lastFaceWidthRatio = face.widthRatio;
+    autoAwayState.missingSince = null;
+    setVisionStatus("Camera active", `Face ${Math.round(face.confidence * 100)}%`, "ok");
+    return;
+  }
+
+  if (!autoAwayState.missingSince) {
+    autoAwayState.missingSince = now;
+  }
+  const missingMs = now - autoAwayState.missingSince;
+  const remainingSeconds = Math.max(0, Math.ceil((settings.seconds * 1000 - missingMs) / 1000));
+  setVisionStatus("No face detected", remainingSeconds ? `Pauses in ${remainingSeconds}s` : "Pausing", "warning");
+  if (missingMs >= settings.seconds * 1000) {
+    autoAwayState.missingSince = null;
+    await addAutoAwayPause();
+  }
+}
+
+function bestUsableFace(detections, video, profile) {
+  const width = video.videoWidth || video.width || 320;
+  const height = video.videoHeight || video.height || 240;
+  let bestFace = null;
+  for (const detection of detections) {
+    const score = detection.categories?.[0]?.score ?? detection.score?.[0] ?? 0;
+    const box = detection.boundingBox;
+    if (!box || score < profile.minConfidence) continue;
+    const boxWidth = Number(box.width) || 0;
+    const boxHeight = Number(box.height) || 0;
+    const widthRatio = boxWidth / width;
+    const areaRatio = (boxWidth * boxHeight) / (width * height);
+    if (widthRatio >= profile.minWidthRatio && areaRatio >= profile.minAreaRatio) {
+      if (!bestFace || score > bestFace.confidence) {
+        bestFace = { confidence: score, widthRatio, areaRatio };
+      }
+    }
+  }
+  return bestFace;
 }
 
 function renderHistory() {

@@ -11,6 +11,11 @@ let statusTimer;
 
 const DEFAULT_CATEGORIES = ["Bathroom", "Family", "Break", "Admin", "Meal", "Other"];
 const APP_ID = "local.workday-time-tracker";
+const AUTO_AWAY_DEFAULTS = {
+  enabled: false,
+  seconds: 30,
+  sensitivity: "normal"
+};
 
 app.setAppUserModelId(APP_ID);
 
@@ -60,15 +65,28 @@ function openDatabase() {
     INSERT OR IGNORE INTO settings (key, value)
     VALUES ('timeZone', ?)
   `).run(Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC");
+  setDefaultSetting("autoAwayEnabled", AUTO_AWAY_DEFAULTS.enabled ? "1" : "0");
+  setDefaultSetting("autoAwaySeconds", String(AUTO_AWAY_DEFAULTS.seconds));
+  setDefaultSetting("autoAwaySensitivity", AUTO_AWAY_DEFAULTS.sensitivity);
 }
 
 function getSetting(key, fallback) {
   return db.prepare("SELECT value FROM settings WHERE key = ?").get(key)?.value || fallback;
 }
 
+function setDefaultSetting(key, value) {
+  db.prepare(`
+    INSERT OR IGNORE INTO settings (key, value)
+    VALUES (?, ?)
+  `).run(key, value);
+}
+
 function settings() {
   return {
-    timeZone: getSetting("timeZone", Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC")
+    timeZone: getSetting("timeZone", Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC"),
+    autoAwayEnabled: getSetting("autoAwayEnabled", "0") === "1",
+    autoAwaySeconds: validateAutoAwaySeconds(getSetting("autoAwaySeconds", String(AUTO_AWAY_DEFAULTS.seconds))),
+    autoAwaySensitivity: validateAutoAwaySensitivity(getSetting("autoAwaySensitivity", AUTO_AWAY_DEFAULTS.sensitivity))
   };
 }
 
@@ -87,6 +105,16 @@ function validateTimeZone(timeZone) {
   } catch {
     return "UTC";
   }
+}
+
+function validateAutoAwaySeconds(value) {
+  const seconds = Number(value);
+  return [15, 30, 60].includes(seconds) ? seconds : AUTO_AWAY_DEFAULTS.seconds;
+}
+
+function validateAutoAwaySensitivity(value) {
+  const sensitivity = String(value || "");
+  return ["relaxed", "normal", "strict"].includes(sensitivity) ? sensitivity : AUTO_AWAY_DEFAULTS.sensitivity;
 }
 
 function datePartsInZone(date = new Date(), timeZone = settings().timeZone) {
@@ -984,6 +1012,9 @@ ipcMain.handle("csv:exportToday", async () => {
 ipcMain.handle("settings:update", (_event, payload) => {
   const timeZone = validateTimeZone(String(payload?.timeZone || ""));
   setSetting("timeZone", timeZone);
+  setSetting("autoAwayEnabled", payload?.autoAwayEnabled ? "1" : "0");
+  setSetting("autoAwaySeconds", String(validateAutoAwaySeconds(payload?.autoAwaySeconds)));
+  setSetting("autoAwaySensitivity", validateAutoAwaySensitivity(payload?.autoAwaySensitivity));
   updateTray();
   updateAppMenu();
   return currentState();
