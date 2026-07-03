@@ -17,7 +17,23 @@ These builds are unsigned. On macOS, you may need to right-click the app and cho
 
 ## Screenshots
 
+### Timer
+
 ![Timer dashboard](docs/screenshots/timer-dashboard.png)
+
+### Stats
+
+![Stats timeline and project totals](docs/screenshots/stats-timeline.png)
+
+### Movement
+
+![Movement insights and timeline](docs/screenshots/movement-insights.png)
+
+### History
+
+![History project attribution](docs/screenshots/history-projects.png)
+
+### macOS Menu Bar
 
 ![macOS menu bar status](docs/screenshots/menu-bar-status.png)
 
