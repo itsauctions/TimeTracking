@@ -19,21 +19,41 @@ These builds are unsigned. On macOS, you may need to right-click the app and cho
 
 ### Timer
 
+The main timer view shows the active project, camera auto-away status, local camera privacy note, quick pause reasons, and today's recent entries.
+
 ![Timer dashboard](docs/screenshots/timer-dashboard.png)
 
 ### Stats
+
+The Stats page shows day timelines, project-colored work segments, pause time, project totals, and date/time/project filters.
 
 ![Stats timeline and project totals](docs/screenshots/stats-timeline.png)
 
 ### Movement
 
+The Movement page summarizes posture and movement signals into local-only insights and a timeline for movement, elevated-risk points, and high-risk points.
+
 ![Movement insights and timeline](docs/screenshots/movement-insights.png)
 
 ### History
 
+The History page lets you review entries and time periods, see project assignment badges, reassign work periods, and delete incorrect entries or periods.
+
 ![History project attribution](docs/screenshots/history-projects.png)
 
+### Settings
+
+Camera settings explain that face detection runs locally, no camera data is recorded or sent over the internet, and movement metrics stay local.
+
+![Settings camera privacy](docs/screenshots/settings-camera-privacy.png)
+
+Project settings let you add projects, choose colors, rename them, and archive projects without losing historical attribution.
+
+![Settings project manager](docs/screenshots/settings-projects.png)
+
 ### macOS Menu Bar
+
+The macOS menu bar item shows current work or pause state, elapsed time, and the active project.
 
 ![macOS menu bar status](docs/screenshots/menu-bar-status.png)
 
