@@ -4,6 +4,23 @@ Workday Time Tracker is a small desktop app for tracking the shape of a workday:
 
 It is built for simple, repeated use: large buttons, local storage, quick pause reasons, daily/weekly/monthly stats, and an XLSX export when you want a spreadsheet copy.
 
+## Download
+
+Download the latest unsigned desktop binaries from the GitHub Releases page:
+
+- [Latest release](https://github.com/itsauctions/TimeTracking/releases/latest)
+- macOS: download the versioned `Workday-Time-Tracker-*-mac-universal.dmg`
+- Windows: download the versioned `Workday-Time-Tracker-*-win-x64.exe`
+- Optional checksum files are included as `SHA256SUMS-macOS.txt` and `SHA256SUMS-Windows.txt`
+
+These builds are unsigned. On macOS, you may need to right-click the app and choose **Open**, or approve it in Privacy & Security. On Windows, SmartScreen may warn because the executable is unsigned.
+
+## Screenshots
+
+![Timer dashboard](docs/screenshots/timer-dashboard.png)
+
+![macOS menu bar status](docs/screenshots/menu-bar-status.png)
+
 ## Features
 
 - Start work, pause, resume, and end the day from one screen.
@@ -116,7 +133,7 @@ git push origin master --tags
 
 The `Release` workflow builds the macOS DMG on `macos-latest` and the Windows portable executable on `windows-latest`, then attaches both to the GitHub Release with SHA-256 checksum files.
 
-These builds are unsigned. On macOS, users may need to right-click the app and choose **Open**, or approve it in Privacy & Security. On Windows, SmartScreen may warn because the executable is unsigned.
+The release assets use version-scoped names such as `Workday-Time-Tracker-0.3.3-mac-universal.dmg` and `Workday-Time-Tracker-0.3.3-win-x64.exe`.
 
 ## Using The App
 
