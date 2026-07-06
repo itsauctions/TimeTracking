@@ -43,6 +43,7 @@
     "files": [
       "src/**/*",
       "assets/**/*",
+      "node_modules/@mediapipe/tasks-vision/**/*",
       "package.json"
     ],
     "asarUnpack": [
