@@ -6,6 +6,7 @@ const input = path.join(__dirname, "..", "assets", "app-icon.png");
 const output = path.join(__dirname, "..", "assets", "app-icon.ico");
 const tauriOutput = path.join(__dirname, "..", "src-tauri", "icons", "icon.ico");
 const rgbaOutput = path.join(__dirname, "..", "assets", "app-icon-rgba.png");
+const trayOutput = path.join(__dirname, "..", "assets", "app-icon-tray.png");
 const sizes = [256, 128, 64, 48, 40, 32, 24, 20, 16];
 
 function readPng(filePath) {
@@ -322,6 +323,8 @@ const images = sizes.map((size) => ({ size, data: writePng(makeIcoFrame(source, 
 writeIco(output, images);
 writeIco(tauriOutput, images);
 fs.writeFileSync(rgbaOutput, writePng(source));
+fs.writeFileSync(trayOutput, writePng(createSmallWindowsIcon(32)));
 console.log(`Wrote ${output}`);
 console.log(`Wrote ${tauriOutput}`);
 console.log(`Wrote ${rgbaOutput}`);
+console.log(`Wrote ${trayOutput}`);

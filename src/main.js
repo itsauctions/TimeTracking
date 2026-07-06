@@ -718,6 +718,16 @@ function addEvent(type, reason = "", note = "", projectId = null) {
   return currentState();
 }
 
+function stopOpenWorkdayForQuit() {
+  if (!db) return;
+  const state = currentState();
+  if (state.status !== "working" && state.status !== "paused") return;
+  db.prepare(`
+    INSERT INTO events (event_type, reason, note, project_id, occurred_at)
+    VALUES ('stop', NULL, 'Auto-stopped when app quit', NULL, ?)
+  `).run(new Date().toISOString());
+}
+
 function statusLabel(status) {
   if (status === "working") return "Working";
   if (status === "paused") return "Paused";
@@ -1214,7 +1224,7 @@ function createWindow() {
     minWidth: 760,
     minHeight: 560,
     title: "Workday Time Tracker",
-    icon: assetPath("app-icon.png"),
+    icon: process.platform === "win32" ? assetPath("app-icon.ico") : assetPath("app-icon.png"),
     show: false,
     webPreferences: {
       preload: path.join(__dirname, "preload.js")
@@ -1230,7 +1240,8 @@ function createWindow() {
 
 function createTray() {
   const traySize = process.platform === "darwin" ? 18 : 16;
-  const icon = nativeImage.createFromPath(assetPath("app-icon-rgba.png")).resize({ width: traySize, height: traySize });
+  const trayIcon = process.platform === "win32" ? "app-icon-tray.png" : "app-icon-rgba.png";
+  const icon = nativeImage.createFromPath(assetPath(trayIcon)).resize({ width: traySize, height: traySize });
   if (process.platform === "darwin") {
     icon.setTemplateImage(true);
   }
@@ -1597,6 +1608,7 @@ app.whenReady().then(async () => {
 });
 
 app.on("before-quit", () => {
+  stopOpenWorkdayForQuit();
   if (statusTimer) clearInterval(statusTimer);
 });
 
