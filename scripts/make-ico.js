@@ -207,33 +207,42 @@ function drawLine(image, startX, startY, endX, endY, width, color) {
 function createSmallWindowsIcon(size) {
   const image = { width: size, height: size, pixels: Buffer.alloc(size * size * 4) };
   const center = size / 2;
-  const outerRadius = size * 0.47;
-  const ringWidth = Math.max(2, size * 0.16);
+  const outerRadius = size * 0.44;
+  const ringWidth = Math.max(2, size * 0.13);
   const innerRadius = outerRadius - ringWidth;
-  const navy = [17, 73, 91, 255];
-  const teal = [38, 143, 163, 255];
-  const pale = [246, 251, 252, 255];
-  const hand = [27, 48, 55, 255];
+  const navy = [14, 61, 78, 255];
+  const teal = [34, 139, 160, 255];
+  const pale = [250, 253, 253, 255];
+  const shadow = [10, 40, 52, 80];
+  const hand = [16, 35, 44, 255];
 
+  drawCircle(image, center, center + Math.max(1, size * 0.04), outerRadius, shadow);
   drawCircle(image, center, center, outerRadius, navy);
-  drawCircle(image, center, center, outerRadius - Math.max(1, ringWidth * 0.45), teal);
+  drawCircle(image, center, center, outerRadius - Math.max(1, ringWidth * 0.38), teal);
   drawCircle(image, center, center, innerRadius, pale);
 
-  if (size >= 32) {
-    const tickRadius = innerRadius * 0.76;
-    const tickWidth = Math.max(1, size * 0.05);
+  if (size >= 40) {
+    const tickRadius = innerRadius * 0.74;
+    const tickWidth = Math.max(1, size * 0.045);
     drawLine(image, center, center - tickRadius, center, center - tickRadius - size * 0.08, tickWidth, navy);
     drawLine(image, center + tickRadius, center, center + tickRadius + size * 0.08, center, tickWidth, navy);
     drawLine(image, center, center + tickRadius, center, center + tickRadius + size * 0.08, tickWidth, navy);
     drawLine(image, center - tickRadius, center, center - tickRadius - size * 0.08, center, tickWidth, navy);
   }
 
-  drawLine(image, center, center, center - size * 0.17, center - size * 0.18, Math.max(2, size * 0.08), hand);
-  drawLine(image, center, center, center + size * 0.2, center - size * 0.28, Math.max(2, size * 0.08), hand);
-  drawCircle(image, center, center, Math.max(1.2, size * 0.06), hand);
+  drawLine(image, center, center, center - size * 0.16, center - size * 0.15, Math.max(2, size * 0.095), hand);
+  drawLine(image, center, center, center + size * 0.18, center - size * 0.25, Math.max(2, size * 0.095), hand);
+  drawCircle(image, center, center, Math.max(1.5, size * 0.065), hand);
 
-  drawLine(image, center - size * 0.3, center + size * 0.12, center - size * 0.12, center + size * 0.31, Math.max(2, size * 0.09), teal);
-  drawLine(image, center - size * 0.12, center + size * 0.31, center + size * 0.32, center - size * 0.17, Math.max(2, size * 0.09), teal);
+  if (size >= 24) {
+    const barBase = center + size * 0.28;
+    const barWidth = Math.max(2, size * 0.11);
+    const gap = Math.max(1, size * 0.04);
+    const startX = center - barWidth - gap;
+    drawLine(image, startX, barBase, startX, barBase - size * 0.18, barWidth, navy);
+    drawLine(image, startX + barWidth + gap, barBase, startX + barWidth + gap, barBase - size * 0.28, barWidth, teal);
+    drawLine(image, startX + (barWidth + gap) * 2, barBase, startX + (barWidth + gap) * 2, barBase - size * 0.38, barWidth, navy);
+  }
 
   return image;
 }
