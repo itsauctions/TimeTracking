@@ -1223,11 +1223,8 @@ function createWindow() {
 
   mainWindow.loadFile(path.join(__dirname, "index.html"));
   mainWindow.once("ready-to-show", () => mainWindow.show());
-  mainWindow.on("close", (event) => {
-    if (!app.isQuiting) {
-      event.preventDefault();
-      mainWindow.hide();
-    }
+  mainWindow.on("closed", () => {
+    mainWindow = null;
   });
 }
 
@@ -1603,6 +1600,6 @@ app.on("before-quit", () => {
   if (statusTimer) clearInterval(statusTimer);
 });
 
-app.on("window-all-closed", (event) => {
-  event.preventDefault();
+app.on("window-all-closed", () => {
+  app.quit();
 });
