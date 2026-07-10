@@ -7,9 +7,16 @@ const path = require("node:path");
  * downloaded build as "damaged". This does not replace Developer ID
  * signing/notarization; users still get an unidentified-developer prompt
  * they can bypass with right-click Open.
+ *
+ * Skip electron-builder's intermediate *-temp packs used to assemble a
+ * universal binary — signing those changes CodeResources and breaks the merge.
  */
 exports.default = async function afterPack(context) {
   if (context.electronPlatformName !== "darwin") {
+    return;
+  }
+
+  if (String(context.appOutDir).endsWith("-temp")) {
     return;
   }
 
