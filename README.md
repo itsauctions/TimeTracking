@@ -9,7 +9,8 @@ It is built for simple, repeated use: large buttons, local storage, quick pause 
 Download the latest desktop binaries from the GitHub Releases page:
 
 - [Latest release](https://github.com/itsauctions/TimeTracking/releases/latest)
-- macOS: download the versioned `Workday-Time-Tracker-*-mac-universal.dmg`
+- macOS Apple Silicon: download `Workday-Time-Tracker-*-mac-arm64.dmg`
+- macOS Intel: download `Workday-Time-Tracker-*-mac-x64.dmg`
 - Windows: download the versioned `Workday-Time-Tracker-*-win-x64.exe`
 - Optional checksum files are included as `SHA256SUMS-macOS.txt` and `SHA256SUMS-Windows.txt`
 
@@ -159,7 +160,7 @@ Build a portable Windows executable:
 npm run package:win
 ```
 
-Build the universal macOS DMG for both Intel and Apple Silicon Macs:
+Build separate macOS DMGs for Intel (`x64`) and Apple Silicon (`arm64`):
 
 ```bash
 npm run package:mac
@@ -186,7 +187,7 @@ git push origin master --tags
 
 The `Release` workflow builds the macOS DMG on `macos-latest` and the Windows portable executable on `windows-latest`, then attaches both to the GitHub Release with SHA-256 checksum files.
 
-The release assets use version-scoped names such as `Workday-Time-Tracker-0.3.3-mac-universal.dmg` and `Workday-Time-Tracker-0.3.3-win-x64.exe`.
+The release assets use version-scoped names such as `Workday-Time-Tracker-0.3.14-mac-arm64.dmg`, `Workday-Time-Tracker-0.3.14-mac-x64.dmg`, and `Workday-Time-Tracker-0.3.14-win-x64.exe`.
 
 ## Using The App
 

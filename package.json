@@ -14,7 +14,7 @@
     "make:icons": "npm run make:icon && npm run make:icon:mac",
     "tauri:dev": "tauri dev",
     "tauri:build": "tauri build",
-    "package:mac": "electron-builder --mac dmg --universal",
+    "package:mac": "electron-builder --mac dmg --x64 --arm64",
     "package:win": "electron-builder --win portable",
     "package:win:wsl": "electron-builder --win portable -c.win.signAndEditExecutable=false"
   },

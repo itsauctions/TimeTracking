@@ -46,6 +46,34 @@ jobs:
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: false
 
+      - name: Verify macOS native module architectures
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          apps=(dist/mac/Workday\ Time\ Tracker.app dist/mac-arm64/Workday\ Time\ Tracker.app dist/mac-x64/Workday\ Time\ Tracker.app)
+          found=0
+          for app in "${apps[@]}"; do
+            [ -d "$app" ] || continue
+            found=1
+            node_path="$app/Contents/Resources/app.asar.unpacked/node_modules/better-sqlite3/build/Release/better_sqlite3.node"
+            electron_bin="$app/Contents/MacOS/Workday Time Tracker"
+            echo "Checking $app"
+            file "$electron_bin"
+            file "$node_path"
+            electron_arch="$(lipo -archs "$electron_bin")"
+            node_arch="$(lipo -archs "$node_path")"
+            echo "electron=$electron_arch sqlite=$node_arch"
+            for arch in $electron_arch; do
+              echo "$node_arch" | grep -qw "$arch"
+            done
+          done
+          if [ "$found" -eq 0 ]; then
+            echo "No macOS app bundles found under dist/"
+            exit 1
+          fi
+
       - name: Generate checksums
         shell: bash
         run: |
@@ -66,6 +94,10 @@ jobs:
             dist/SHA256SUMS-*.txt
           body: |
             Desktop build without Apple/Microsoft developer certificates.
+
+            ### macOS downloads
+            - Apple Silicon (M1/M2/M3/M4): `Workday-Time-Tracker-*-mac-arm64.dmg`
+            - Intel Macs: `Workday-Time-Tracker-*-mac-x64.dmg`
 
             ### macOS first open
             The app is ad-hoc signed (not Apple-notarized). Gatekeeper may show **“Workday Time Tracker” Not Opened** / *Apple could not verify…* with only **Move to Trash** and **Done**. That is normal, not a corrupt download.
