@@ -40,6 +40,7 @@
     "productName": "Workday Time Tracker",
     "artifactName": "Workday-Time-Tracker-${version}-${os}-${arch}.${ext}",
     "icon": "assets/app-icon.png",
+    "afterPack": "./scripts/after-pack.js",
     "files": [
       "src/**/*",
       "assets/**/*",
@@ -56,6 +57,8 @@
     "mac": {
       "icon": "assets/app-icon.icns",
       "category": "public.app-category.productivity",
+      "identity": null,
+      "gatekeeperAssess": false,
       "extendInfo": {
         "NSCameraUsageDescription": "Workday Time Tracker can use the camera locally to pause tracking when you step away."
       },

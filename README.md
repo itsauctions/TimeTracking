@@ -6,14 +6,14 @@ It is built for simple, repeated use: large buttons, local storage, quick pause 
 
 ## Download
 
-Download the latest unsigned desktop binaries from the GitHub Releases page:
+Download the latest desktop binaries from the GitHub Releases page:
 
 - [Latest release](https://github.com/itsauctions/TimeTracking/releases/latest)
 - macOS: download the versioned `Workday-Time-Tracker-*-mac-universal.dmg`
 - Windows: download the versioned `Workday-Time-Tracker-*-win-x64.exe`
 - Optional checksum files are included as `SHA256SUMS-macOS.txt` and `SHA256SUMS-Windows.txt`
 
-These builds are unsigned. On macOS, you may need to right-click the app and choose **Open**, or approve it in Privacy & Security. On Windows, SmartScreen may warn because the executable is unsigned.
+These builds are not notarized with an Apple/Microsoft developer certificate. macOS builds are ad-hoc signed so Gatekeeper should not report them as damaged; you may still need to right-click the app and choose **Open**, or approve it in Privacy & Security. On Windows, SmartScreen may warn because the executable is unsigned.
 
 ## Screenshots
 

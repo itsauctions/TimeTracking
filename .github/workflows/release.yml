@@ -38,7 +38,10 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Build unsigned artifacts
+      # Skip electron-builder's keychain signing. macOS still gets an ad-hoc
+      # signature from scripts/after-pack.js so Gatekeeper does not call the
+      # download "damaged". Users may still need right-click → Open once.
+      - name: Build release artifacts
         run: ${{ matrix.build_command }}
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: false
@@ -62,7 +65,7 @@ jobs:
             ${{ matrix.release_glob }}
             dist/SHA256SUMS-*.txt
           body: |
-            Unsigned desktop build.
+            Desktop build without Apple/Microsoft developer certificates.
 
-            macOS: if Gatekeeper blocks the app, right-click the app and choose Open, or approve it in Privacy & Security.
+            macOS: the app is ad-hoc signed. If Gatekeeper warns about an unidentified developer, right-click the app and choose Open, or approve it in Privacy & Security.
             Windows: SmartScreen may warn because the app is unsigned.
