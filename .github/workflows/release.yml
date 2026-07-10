@@ -67,5 +67,16 @@ jobs:
           body: |
             Desktop build without Apple/Microsoft developer certificates.
 
-            macOS: the app is ad-hoc signed. If Gatekeeper warns about an unidentified developer, right-click the app and choose Open, or approve it in Privacy & Security.
-            Windows: SmartScreen may warn because the app is unsigned.
+            ### macOS first open
+            The app is ad-hoc signed (not Apple-notarized). Gatekeeper may show **“Workday Time Tracker” Not Opened** / *Apple could not verify…* with only **Move to Trash** and **Done**. That is normal, not a corrupt download.
+
+            1. Click **Done** (do not move it to Trash).
+            2. Open **System Settings → Privacy & Security**.
+            3. Scroll to the Workday Time Tracker message and click **Open Anyway**.
+            4. Confirm again if macOS asks.
+
+            Optional Terminal workaround after install:
+            `xattr -cr "/Applications/Workday Time Tracker.app"`
+
+            ### Windows
+            SmartScreen may warn because the app is unsigned.

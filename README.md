@@ -13,7 +13,24 @@ Download the latest desktop binaries from the GitHub Releases page:
 - Windows: download the versioned `Workday-Time-Tracker-*-win-x64.exe`
 - Optional checksum files are included as `SHA256SUMS-macOS.txt` and `SHA256SUMS-Windows.txt`
 
-These builds are not notarized with an Apple/Microsoft developer certificate. macOS builds are ad-hoc signed so Gatekeeper should not report them as damaged; you may still need to right-click the app and choose **Open**, or approve it in Privacy & Security. On Windows, SmartScreen may warn because the executable is unsigned.
+These builds are not notarized with an Apple/Microsoft developer certificate. macOS builds are ad-hoc signed so Gatekeeper should not report them as damaged. On Windows, SmartScreen may warn because the executable is unsigned.
+
+### macOS: first open
+
+After installing from the DMG, macOS may show **“Workday Time Tracker” Not Opened** / *Apple could not verify…* with only **Move to Trash** and **Done**. That is Gatekeeper, not a corrupt download.
+
+1. Click **Done** (do not move it to Trash).
+2. Open **System Settings → Privacy & Security**.
+3. Scroll to the message about Workday Time Tracker and click **Open Anyway**.
+4. Confirm again if macOS asks.
+
+You can also clear the download quarantine flag, then open the app:
+
+```bash
+xattr -cr "/Applications/Workday Time Tracker.app"
+```
+
+If the app is still on the Desktop or elsewhere, use that path instead of `/Applications/...`.
 
 ## Screenshots
 
@@ -219,6 +236,8 @@ ELECTRON_RUN_AS_NODE=1 npx electron scripts/db-smoke.js
 ```
 
 ## Troubleshooting
+
+If macOS shows **“Workday Time Tracker” Not Opened** / *Apple could not verify…*, follow the [macOS: first open](#macos-first-open) steps under Download. That warning means the build is not Apple-notarized, not that the DMG is corrupt.
 
 If Electron fails to launch in WSL, install the missing GUI/runtime libraries or run the app from Windows Node/npm instead.
 
