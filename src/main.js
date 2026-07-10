@@ -1,4 +1,4 @@
-const { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, session, Tray } = require("electron");
+const { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, session, systemPreferences, Tray } = require("electron");
 const path = require("node:path");
 const fs = require("node:fs");
 const zlib = require("node:zlib");
@@ -1248,15 +1248,13 @@ function createTray() {
   tray = new Tray(icon);
   tray.setToolTip("Workday Time Tracker");
   tray.on("click", () => {
+    if (process.platform === "darwin") return;
     showMainWindow();
   });
   updateTray();
 }
 
 function showMainWindow() {
-  if (!mainWindow) {
-    createWindow();
-  }
   if (!mainWindow) return;
   mainWindow.show();
   mainWindow.focus();
@@ -1585,14 +1583,22 @@ ipcMain.handle("movement:storeMinute", (_event, minuteData) => {
 ipcMain.handle("movement:get", (_event, range) => getMovement(range));
 ipcMain.handle("movement:getToday", () => getMovement());
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
   session.defaultSession.setPermissionRequestHandler((_webContents, permission, callback) => {
     callback(permission === "media");
   });
 
-  // Show the window first. Camera permission is requested later only when
-  // auto-away actually starts the camera (getUserMedia), so a hidden
-  // permission dialog cannot block first launch.
+  if (process.platform === "darwin") {
+    const status = systemPreferences.getMediaAccessStatus("camera");
+    if (status === "not-determined") {
+      try {
+        await systemPreferences.askForMediaAccess("camera");
+      } catch (error) {
+        console.error("Camera permission request failed", error);
+      }
+    }
+  }
+
   openDatabase();
   createWindow();
   createTray();
