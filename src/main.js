@@ -1231,8 +1231,21 @@ function createWindow() {
     }
   });
 
+  const revealWindow = () => {
+    if (!mainWindow || mainWindow.isDestroyed()) return;
+    if (!mainWindow.isVisible()) {
+      mainWindow.show();
+      mainWindow.focus();
+    }
+  };
+
   mainWindow.loadFile(path.join(__dirname, "index.html"));
-  mainWindow.once("ready-to-show", () => mainWindow.show());
+  mainWindow.once("ready-to-show", revealWindow);
+  mainWindow.webContents.once("did-finish-load", revealWindow);
+  mainWindow.webContents.on("did-fail-load", (_event, errorCode, errorDescription, validatedURL) => {
+    console.error("Window failed to load", { errorCode, errorDescription, validatedURL });
+    revealWindow();
+  });
   mainWindow.on("closed", () => {
     mainWindow = null;
   });
