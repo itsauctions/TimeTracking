@@ -1225,26 +1225,19 @@ function createWindow() {
     minHeight: 560,
     title: "Workday Time Tracker",
     icon: process.platform === "win32" ? assetPath("app-icon.ico") : assetPath("app-icon.png"),
-    show: false,
+    show: true,
     webPreferences: {
       preload: path.join(__dirname, "preload.js")
     }
   });
 
-  const revealWindow = () => {
-    if (!mainWindow || mainWindow.isDestroyed()) return;
-    if (!mainWindow.isVisible()) {
-      mainWindow.show();
-      mainWindow.focus();
-    }
-  };
-
   mainWindow.loadFile(path.join(__dirname, "index.html"));
-  mainWindow.once("ready-to-show", revealWindow);
-  mainWindow.webContents.once("did-finish-load", revealWindow);
   mainWindow.webContents.on("did-fail-load", (_event, errorCode, errorDescription, validatedURL) => {
     console.error("Window failed to load", { errorCode, errorDescription, validatedURL });
-    revealWindow();
+    dialog.showErrorBox(
+      "Workday Time Tracker failed to load",
+      `${errorDescription}\n\nURL: ${validatedURL}\nCode: ${errorCode}`
+    );
   });
   mainWindow.on("closed", () => {
     mainWindow = null;
@@ -1254,7 +1247,12 @@ function createWindow() {
 function createTray() {
   const traySize = process.platform === "darwin" ? 18 : 16;
   const trayIcon = process.platform === "win32" ? "app-icon-tray.png" : "app-icon-rgba.png";
-  const icon = nativeImage.createFromPath(assetPath(trayIcon)).resize({ width: traySize, height: traySize });
+  const iconFile = assetPath(trayIcon);
+  let icon = nativeImage.createFromPath(iconFile);
+  if (icon.isEmpty()) {
+    icon = nativeImage.createFromBuffer(fs.readFileSync(iconFile));
+  }
+  icon = icon.resize({ width: traySize, height: traySize });
   if (process.platform === "darwin") {
     icon.setTemplateImage(true);
   }
@@ -1603,18 +1601,27 @@ app.whenReady().then(() => {
     callback(permission === "media");
   });
 
-  // Always create the window first. A downloaded/ad-hoc-signed build is a
-  // different TCC identity than a local unsigned build, so macOS may prompt
-  // for camera again. Awaiting that before createWindow leaves the app
-  // running with only the default menu/About and no main window.
-  openDatabase();
-  createWindow();
-  createTray();
-  updateAppMenu();
-  statusTimer = setInterval(updateTray, 30000);
-  app.on("activate", showMainWindow);
-
-  // Camera access is requested later when auto-away starts getUserMedia.
+  try {
+    // Show UI before anything that can throw (SQLite native load, tray icon,
+    // etc). Downloaded builds were ending up with only the default macOS
+    // About menu and no BrowserWindow when startup failed early.
+    createWindow();
+    openDatabase();
+    try {
+      createTray();
+    } catch (trayError) {
+      console.error("Tray setup failed", trayError);
+    }
+    updateAppMenu();
+    statusTimer = setInterval(updateTray, 30000);
+    app.on("activate", showMainWindow);
+  } catch (error) {
+    console.error("Startup failed", error);
+    dialog.showErrorBox(
+      "Workday Time Tracker failed to start",
+      String(error && error.stack ? error.stack : error)
+    );
+  }
 });
 
 app.on("before-quit", () => {

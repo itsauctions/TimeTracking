@@ -23,6 +23,7 @@ exports.default = async function afterPack(context) {
 
   const appName = `${context.packager.appInfo.productFilename}.app`;
   const appPath = path.join(context.appOutDir, appName);
+  const entitlements = path.join(__dirname, "..", "build", "entitlements.mac.plist");
 
   if (!fs.existsSync(appPath)) {
     throw new Error(`afterPack: expected app bundle at ${appPath}`);
@@ -35,7 +36,8 @@ exports.default = async function afterPack(context) {
     preEmbedProvisioningProfile: false,
     preAutoEntitlements: false,
     optionsForFile: () => ({
-      hardenedRuntime: false,
+      entitlements,
+      hardenedRuntime: true,
       timestamp: "none"
     })
   });

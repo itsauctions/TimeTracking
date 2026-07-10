@@ -48,6 +48,7 @@
       "package.json"
     ],
     "asarUnpack": [
+      "node_modules/better-sqlite3/**/*",
       "node_modules/**/*.node"
     ],
     "win": {
@@ -59,6 +60,8 @@
       "category": "public.app-category.productivity",
       "identity": null,
       "gatekeeperAssess": false,
+      "entitlements": "build/entitlements.mac.plist",
+      "entitlementsInherit": "build/entitlements.mac.plist",
       "extendInfo": {
         "NSCameraUsageDescription": "Workday Time Tracker can use the camera locally to pause tracking when you step away."
       },
