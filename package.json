@@ -1,6 +1,6 @@
 {
   "name": "workday-time-tracker",
-  "version": "0.3.9",
+  "version": "0.3.10",
   "description": "A small desktop workday timer with SQLite storage and XLSX export.",
   "main": "src/main.js",
   "scripts": {
